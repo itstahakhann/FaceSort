@@ -23,6 +23,7 @@ const ui = {
   enginePill: $('engine-pill'),
   engineLabel: $('engine-label'),
   themeToggle: $('theme-toggle'),
+  progressFill: $('progress-fill'),
 
   input: $('input-folder'),
   output: $('output-folder'),
@@ -50,6 +51,7 @@ const ui = {
 
   stage: $('stage'),
   dropzone: $('dropzone'),
+  dropzoneChosen: $('dropzone-chosen'),
   dragVeil: $('drag-veil'),
   scanBar: $('scan-bar'),
   scanBarWrap: $('scan-bar-wrap'),
@@ -121,7 +123,7 @@ function plural(count, word) {
 function toast(message, kind = '', iconName = null) {
   const node = document.createElement('div');
   node.className = `toast ${kind}`.trim();
-  node.append(icon(iconName || (kind === 'error' ? 'alert' : kind === 'ok' ? 'check' : 'sparkles')));
+  node.append(icon(iconName || (kind === 'error' ? 'alert' : kind === 'ok' ? 'check' : 'tag')));
   const text = document.createElement('span');
   text.textContent = message;
   node.append(text);
@@ -184,11 +186,14 @@ function setView(view) {
     section.hidden = !active;
   }
   const index = STEP_ORDER.indexOf(view);
-  for (const step of document.querySelectorAll('.step')) {
+  for (const step of document.querySelectorAll('.pstep')) {
     const stepIndex = STEP_ORDER.indexOf(step.dataset.step);
     step.classList.toggle('is-current', stepIndex === index);
     step.classList.toggle('is-done', stepIndex < index);
   }
+  // one rail that fills to the active step — progress as a quantity, not decoration
+  const reached = STEP_ORDER.length > 1 ? index / (STEP_ORDER.length - 1) : 0;
+  ui.progressFill.style.width = `${reached * 100}%`;
   ui.stage.scrollTop = 0;
   updateScrollTop();
 }
@@ -206,6 +211,14 @@ function setBusy(busy, label) {
   ui.pickOutput.disabled = busy;
   ui.scanLabel.textContent = busy ? 'Working…' : 'Scan photos';
   if (label) ui.organizeLabel.textContent = label;
+}
+
+/** Keep the target's trailing slot in sync with the chosen folder. */
+function showChosenFolder(path) {
+  if (!ui.dropzoneChosen) return;
+  const name = path ? path.split(/[\\/]/).filter(Boolean).pop() : '';
+  ui.dropzoneChosen.textContent = name || '';
+  ui.dropzone.classList.toggle('has-folder', Boolean(name));
 }
 
 /* ========================================================== settings */
@@ -227,6 +240,7 @@ function applyStatus(status) {
   const config = status.config || {};
   if (!ui.input.value) {
     ui.input.value = config.input_exists ? config.input_folder : '';
+    if (ui.input.value) showChosenFolder(ui.input.value);
   }
   if (!ui.output.value) {
     ui.output.value = config.output_exists ? config.output_folder : '';
@@ -295,17 +309,16 @@ function renderSummary(status) {
 }
 
 function renderScanStats(stats) {
-  const pills = [
-    ['photos', stats.photos], ['faces', stats.faces], ['groups', stats.groups],
+  const rows = [
+    ['photos found', stats.photos], ['faces', stats.faces], ['groups', stats.groups],
   ].filter(([, value]) => value !== undefined && value !== null);
   ui.scanStats.replaceChildren();
-  for (const [label, value] of pills) {
-    const pill = document.createElement('li');
-    pill.className = 'stat-pill';
+  for (const [label, value] of rows) {
+    const item = document.createElement('li');
     const strong = document.createElement('b');
     strong.textContent = String(value);
-    pill.append(strong, document.createTextNode(label));
-    ui.scanStats.append(pill);
+    item.append(strong, document.createTextNode(label));
+    ui.scanStats.append(item);
   }
 }
 
@@ -390,7 +403,7 @@ async function poll() {
     ui.miniBar.style.width = `${pct}%`;
     ui.miniCount.textContent = `${done} / ${total}`;
     ui.miniLabel.textContent = `Sorting ${info.current || 'photos'}`;
-    toast(`Copying photos — ${done} of ${total}`, '', 'folder');
+    // a toast per poll tick would bury the UI — the meter already shows it
     state.poll = setTimeout(poll, 400);
     return;
   }
@@ -469,8 +482,8 @@ function renderClusters() {
   });
   if (!shown) {
     const empty = document.createElement('p');
-    empty.className = 'muted';
-    empty.style.padding = '24px';
+    empty.className = 'note';
+    empty.style.padding = 'var(--s5) 0';
     empty.textContent = query ? 'No group matches that filter.' : 'No groups yet.';
     ui.clusters.append(empty);
   }
@@ -501,29 +514,32 @@ function buildCard(cluster) {
   meta.textContent = (name ? `Group ${cluster.id + 1} · ` : '')
     + `${plural(cluster.size, 'face')} · ${plural(cluster.photos, 'photo')}`;
   idBox.append(idText, meta);
+  // only announce a state that differs from "unnamed" — absence is the default
   const badge = document.createElement('span');
   badge.className = `badge ${name ? (cluster.auto ? 'auto' : 'named') : 'unnamed'}`;
-  badge.textContent = name ? (cluster.auto ? 'remembered' : 'named') : 'not named';
+  badge.textContent = name ? (cluster.auto ? 'remembered' : 'named') : '';
   top.append(idBox, badge);
 
   const grid = document.createElement('div');
   grid.className = 'thumb-grid';
   for (const face of cluster.faces) {
+    // a <figure> inside a <button> is the correct nesting for a labelled image
     const tile = document.createElement('button');
     tile.type = 'button';
     tile.className = 'thumb';
     tile.title = `${face.photo} — click to enlarge`;
     if (face.thumb) {
+      const figure = document.createElement('figure');
       const image = document.createElement('img');
       image.src = face.thumb;
       image.alt = `Face from ${face.photo}`;
       image.loading = 'lazy';
       image.decoding = 'async';
-      tile.append(image);
+      const caption = document.createElement('figcaption');
+      caption.textContent = face.photo;
+      figure.append(image, caption);
+      tile.append(figure);
     }
-    const caption = document.createElement('figcaption');
-    caption.textContent = face.photo;
-    tile.append(caption);
     tile.addEventListener('click', (event) => {
       event.stopPropagation();
       openLightbox(face);
@@ -714,6 +730,9 @@ async function runOrganize() {
   ui.mini.hidden = false;
   ui.miniBar.style.width = '0%';
   ui.miniLabel.textContent = 'Sorting photos';
+  toast(state.mode === 'move'
+    ? 'Moving photos into their folders…'
+    : 'Copying photos into their folders…', '', 'folder');
   try {
     await bridge.api.organize(state.mode);
     clearTimeout(state.poll);
@@ -740,36 +759,40 @@ function showDone(status) {
     [(status.stats && status.stats.faces) || 0, 'faces found'],
   ];
   ui.doneStats.replaceChildren();
-  stats.forEach(([value, label], index) => {
-    const box = document.createElement('div');
-    box.className = 'done-stat';
-    box.style.animationDelay = `${140 + index * 80}ms`;
+  stats.forEach(([value, label]) => {
+    // <dl> needs dt/dd, so each cell is a div wrapper holding the pair
+    const cell = document.createElement('div');
+    const term = document.createElement('dt');
+    term.className = 'sr-only';
+    term.textContent = label;
+    const detail = document.createElement('dd');
     const strong = document.createElement('b');
     strong.textContent = String(value);
-    const span = document.createElement('span');
-    span.textContent = label;
-    box.append(strong, span);
-    ui.doneStats.append(box);
+    detail.append(strong, document.createTextNode(label));
+    cell.append(term, detail);
+    ui.doneStats.append(cell);
   });
 
   ui.folderList.replaceChildren();
   const entries = Object.entries(results.folders || {}).sort((a, b) => b[1] - a[1]);
   for (const [name, count] of entries) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'folder-row';
-    row.append(icon('folder'));
+    const row = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'folder-row';
+    button.append(icon('folder'));
     const label = document.createElement('span');
     label.textContent = name;
     const amount = document.createElement('b');
     amount.textContent = String(count);
-    row.append(label, amount);
-    row.addEventListener('click', () => bridge.openPath(results.output_folder));
+    button.append(label, amount);
+    button.addEventListener('click', () => bridge.openPath(results.output_folder));
+    row.append(button);
     ui.folderList.append(row);
   }
   if (!entries.length) {
-    const empty = document.createElement('p');
-    empty.className = 'muted';
+    const empty = document.createElement('li');
+    empty.className = 'note';
     empty.textContent = 'Nothing was placed.';
     ui.folderList.append(empty);
   }
@@ -778,7 +801,8 @@ function showDone(status) {
     ? `${plural(results.files_placed, 'photo')} moved into ${plural(entries.length, 'folder')}.`
     : `${plural(results.files_placed, 'photo')} copied into ${plural(entries.length, 'folder')}.`;
 
-  toast(`Sorted ${plural(results.files_placed, 'photo')}`, 'ok');
+  // No "done" toast: the checkmark, the tally and the folder ledger already
+  // state the outcome, and a toast here would sit on top of the action row.
   if (state.celebrate) burst(120);
 }
 
@@ -895,7 +919,7 @@ function setupDragAndDrop() {
     const path = await bridge.pathForFile(file);
     if (path) {
       ui.input.value = path;
-      ui.dropzone.classList.add('has-folder');
+      showChosenFolder(path);
       toast(`Using ${path.split(/[\\/]/).filter(Boolean).pop()}`, 'ok', 'folder');
     }
   });
@@ -913,7 +937,7 @@ async function pickInputFolder() {
   const folder = await bridge.pickFolder('input');
   if (folder) {
     ui.input.value = folder;
-    ui.dropzone.classList.add('has-folder');
+    showChosenFolder(folder);
   }
 }
 
