@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np
 
 from src.names_db import (
+    DB_FILENAME,
     DEFAULT_DB_PATH,
     MAX_SAMPLE_PATHS,
     NamesDB,
@@ -201,25 +202,43 @@ def test_validation_and_open_names_db():
     check("disabled config -> no db", open_names_db({"names_db": ""}) is None)
     check("names_db: none -> no db", open_names_db({"names_db": "none"}) is None)
 
-    # the default path is used when the config has no names_db key (and it
-    # must be created relative to wherever the run happens, not the repo)
+    # With no names_db key (or the legacy default name) the DB must land in the
+    # per-user data dir - NOT the working directory, which may be read-only or a
+    # developer's source tree.
     import os
 
     root = Path(tempfile.mkdtemp(prefix="faceorg_default_"))
+    sandbox = Path(tempfile.mkdtemp(prefix="faceorg_datadir_"))
     previous = Path.cwd()
+    previous_override = os.environ.get("FACEORG_DATA_DIR")
     try:
-        os.chdir(root)
+        os.chdir(root)                      # cwd must not influence anything
+        os.environ["FACEORG_DATA_DIR"] = str(sandbox)
         db = open_names_db({})
-        check("missing key falls back to the default path",
-              db is not None and db.path == DEFAULT_DB_PATH,
+        expected = str(sandbox / DB_FILENAME)
+        check("missing key falls back to the per-user default path",
+              db is not None and db.path == expected,
               "" if db is None else db.path)
         if db is not None:
             db.close()
-        check("default db file lands in the working directory",
-              (root / "facesort_names.db").is_file())
+        check("default db file lands in the data dir, not the cwd",
+              (sandbox / DB_FILENAME).is_file()
+              and not (root / DB_FILENAME).exists())
+
+        legacy = open_names_db({"names_db": "./facesort_names.db"})
+        if legacy is not None:
+            legacy.close()
+        check("legacy './facesort_names.db' resolves to the same file",
+              (sandbox / DB_FILENAME).is_file()
+              and not (root / DB_FILENAME).exists())
     finally:
+        if previous_override is None:
+            os.environ.pop("FACEORG_DATA_DIR", None)
+        else:
+            os.environ["FACEORG_DATA_DIR"] = previous_override
         os.chdir(previous)
         shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(sandbox, ignore_errors=True)
 
     # opening a directory as the DB path must degrade, not raise
     directory = tempfile.mkdtemp()

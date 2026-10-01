@@ -3,68 +3,212 @@
 /**
  * FaceSort — renderer logic.
  *
- * No framework and no build step: the UI is driven straight off the five
- * engine endpoints through the preload bridge (`window.faceorg`).
+ * No framework, no build step: the UI is a small state machine over the five
+ * engine endpoints (`/status`, `/scan`, `/clusters`, `/name_cluster`,
+ * `/organize`, plus the `/thumb` preview) reached through the preload bridge.
  *
- * Flow:  ready → prefill from /status → Scan → poll /status for progress →
- *        GET /clusters → name groups (POST /name_cluster) → POST /organize.
+ * Views: configure -> scanning -> review -> done.  Polling drives the scan and
+ * organize phases; everything else is event-driven.
  */
 
 const bridge = window.faceorg;
 
-const el = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 const ui = {
-  input: el('input-folder'),
-  output: el('output-folder'),
-  tolerance: el('tolerance'),
-  toleranceValue: el('tolerance-value'),
-  minFaces: el('min-faces'),
-  workers: el('workers'),
-  scan: el('scan'),
-  organize: el('organize'),
-  pickInput: el('pick-input'),
-  pickOutput: el('pick-output'),
-  progressPanel: el('progress-panel'),
-  progressBar: el('progress-bar'),
-  progressLabel: el('progress-label'),
-  progressCount: el('progress-count'),
-  summaryPanel: el('summary-panel'),
-  summary: el('summary'),
-  logPanel: el('log-panel'),
-  log: el('log'),
-  logToggle: el('log-toggle'),
-  title: el('content-title'),
-  sub: el('content-sub'),
-  chips: el('chips'),
-  clusters: el('clusters'),
-  empty: el('empty-state'),
-  toast: el('toast'),
+  app: $('app'),
+  sidebar: $('sidebar'),
+  drawerToggle: $('drawer-toggle'),
+  enginePill: $('engine-pill'),
+  engineLabel: $('engine-label'),
+  themeToggle: $('theme-toggle'),
+
+  input: $('input-folder'),
+  output: $('output-folder'),
+  tolerance: $('tolerance'),
+  toleranceValue: $('tolerance-value'),
+  minFaces: $('min-faces'),
+  workers: $('workers'),
+  pickInput: $('pick-input'),
+  pickOutput: $('pick-output'),
+
+  scan: $('scan'),
+  scanLabel: $('scan-label'),
+  organize: $('organize'),
+  organizeLabel: $('organize-label'),
+
+  mini: $('mini-progress'),
+  miniBar: $('mini-bar'),
+  miniLabel: $('mini-label'),
+  miniCount: $('mini-count'),
+  summaryPanel: $('summary-panel'),
+  summary: $('summary'),
+  logPanel: $('log-panel'),
+  log: $('log'),
+  logToggle: $('log-toggle'),
+
+  stage: $('stage'),
+  dropzone: $('dropzone'),
+  dragVeil: $('drag-veil'),
+  scanBar: $('scan-bar'),
+  scanBarWrap: $('scan-bar-wrap'),
+  scanPercent: $('scan-percent'),
+  scanText: $('scan-text'),
+  scanStats: $('scan-stats'),
+  previewImg: $('preview-img'),
+  previewName: $('preview-name'),
+  clusters: $('clusters'),
+  clusterSearch: $('cluster-search'),
+  autoCelebrate: $('auto-celebrate'),
+  doneStats: $('done-stats'),
+  folderList: $('folder-list'),
+  doneOpen: $('done-open'),
+  doneAgain: $('done-again'),
+  doneCelebrate: $('done-celebrate'),
+  scrollTop: $('scroll-top'),
+
+  modalLayer: $('modal-layer'),
+  modalThumbs: $('modal-thumbs'),
+  modalTitle: $('modal-title'),
+  modalSub: $('modal-sub'),
+  modalName: $('modal-name'),
+  modalError: $('modal-error'),
+  modalSuggestions: $('modal-suggestions'),
+  modalSave: $('modal-save'),
+  modalSkip: $('modal-skip'),
+
+  toasts: $('toasts'),
+  live: $('live'),
+  confetti: $('confetti'),
 };
 
 const state = {
+  view: 'configure',
   mode: 'copy',
+  poll: null,
+  pollBusy: false,
   clusters: [],
-  pollTimer: null,
-  toastTimer: null,
-  engineReady: false,
+  names: new Map(),
+  current: null,          // cluster being named in the modal
+  lastFocus: null,
+  lastPreview: '',
+  busy: false,
+  outputFolder: '',
+  celebrate: true,
 };
 
-/* ------------------------------------------------------------- helpers */
+/* ====================================================== tiny helpers */
 
-function toast(message, kind = '') {
-  ui.toast.textContent = message;
-  ui.toast.className = `toast ${kind}`;
-  ui.toast.hidden = false;
-  clearTimeout(state.toastTimer);
-  state.toastTimer = setTimeout(() => { ui.toast.hidden = true; }, 5200);
+function icon(name, cls) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', `icon ${cls || ''}`.trim());
+  const use = document.createElementNS('http://www.w3.org/2000/svg', 'use');
+  use.setAttribute('href', `#i-${name}`);
+  svg.append(use);
+  return svg;
 }
 
-function setBusy(busy) {
+function announce(text) {
+  ui.live.textContent = text;
+}
+
+/** `plural(1, 'photo')` -> "1 photo", `plural(3, 'photo')` -> "3 photos". */
+function plural(count, word) {
+  return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
+
+function toast(message, kind = '', iconName = null) {
+  const node = document.createElement('div');
+  node.className = `toast ${kind}`.trim();
+  node.append(icon(iconName || (kind === 'error' ? 'alert' : kind === 'ok' ? 'check' : 'sparkles')));
+  const text = document.createElement('span');
+  text.textContent = message;
+  node.append(text);
+  ui.toasts.append(node);
+  announce(message);
+  const life = kind === 'error' ? 7000 : 3800;
+  setTimeout(() => {
+    node.classList.add('is-leaving');
+    setTimeout(() => node.remove(), 240);
+  }, life);
+}
+
+/* click ripple on every button */
+document.addEventListener('pointerdown', (event) => {
+  const button = event.target.closest('.btn, .icon-btn, .seg, .suggestion');
+  if (!button || button.disabled) return;
+  const rect = button.getBoundingClientRect();
+  const span = document.createElement('span');
+  span.className = 'ripple';
+  const size = Math.max(rect.width, rect.height) * 2;
+  span.style.width = span.style.height = `${size}px`;
+  span.style.left = `${event.clientX - rect.left}px`;
+  span.style.top = `${event.clientY - rect.top}px`;
+  button.append(span);
+  setTimeout(() => span.remove(), 620);
+});
+
+/* ============================================================= theme */
+
+const THEME_KEY = 'facesort.theme';
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  try { localStorage.setItem(THEME_KEY, theme); } catch (error) { /* private mode */ }
+}
+
+function initTheme() {
+  let stored = null;
+  try { stored = localStorage.getItem(THEME_KEY); } catch (error) { /* ignore */ }
+  const preferred = window.matchMedia('(prefers-color-scheme: light)').matches
+    ? 'light' : 'dark';
+  applyTheme(stored || preferred);
+  ui.themeToggle.addEventListener('click', () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    toast(`${next === 'dark' ? 'Dark' : 'Light'} theme`, '', 'sparkles');
+  });
+}
+
+/* ============================================================== views */
+
+const STEP_ORDER = ['configure', 'scanning', 'review', 'done'];
+
+function setView(view) {
+  if (state.view === view) return;
+  state.view = view;
+  for (const section of document.querySelectorAll('.view')) {
+    const active = section.dataset.view === view;
+    section.classList.toggle('is-active', active);
+    section.hidden = !active;
+  }
+  const index = STEP_ORDER.indexOf(view);
+  for (const step of document.querySelectorAll('.step')) {
+    const stepIndex = STEP_ORDER.indexOf(step.dataset.step);
+    step.classList.toggle('is-current', stepIndex === index);
+    step.classList.toggle('is-done', stepIndex < index);
+  }
+  ui.stage.scrollTop = 0;
+  updateScrollTop();
+}
+
+function setEngine(stateName, label) {
+  ui.enginePill.dataset.state = stateName;
+  ui.engineLabel.textContent = label;
+}
+
+function setBusy(busy, label) {
+  state.busy = busy;
   ui.scan.disabled = busy;
+  ui.organize.disabled = busy || state.clusters.length === 0;
   ui.pickInput.disabled = busy;
   ui.pickOutput.disabled = busy;
-  ui.scan.textContent = busy ? 'Scanning…' : 'Scan photos';
+  ui.scanLabel.textContent = busy ? 'Working…' : 'Scan photos';
+  if (label) ui.organizeLabel.textContent = label;
 }
+
+/* ========================================================== settings */
 
 function readSettings() {
   return {
@@ -81,9 +225,6 @@ function readSettings() {
 function applyStatus(status) {
   if (!status) return;
   const config = status.config || {};
-  // Only prefill a folder that really exists: on a fresh install the shipped
-  // defaults (./input_photos) are placeholders, and showing a dead path in the
-  // field is worse than showing our own placeholder text.
   if (!ui.input.value) {
     ui.input.value = config.input_exists ? config.input_folder : '';
   }
@@ -92,19 +233,34 @@ function applyStatus(status) {
   }
   if (!ui.tolerance.dataset.touched) {
     ui.tolerance.value = String(config.tolerance ?? 0.5);
-    ui.toleranceValue.textContent = Number(ui.tolerance.value).toFixed(2);
+    syncRange();
   }
-  if (!ui.minFaces.dataset.touched) {
-    ui.minFaces.value = String(config.min_faces_per_cluster ?? 2);
-  }
-  if (!ui.workers.dataset.touched) {
-    ui.workers.value = String(config.workers ?? 0);
-  }
+  if (!ui.minFaces.dataset.touched) ui.minFaces.value = String(config.min_faces_per_cluster ?? 2);
+  if (!ui.workers.dataset.touched) ui.workers.value = String(config.workers ?? 0);
   setMode(config.mode === 'move' ? 'move' : 'copy', true);
-  renderStats(status);
+  renderSummary(status);
 }
 
-function renderStats(status) {
+function syncRange() {
+  const input = ui.tolerance;
+  const pct = ((Number(input.value) - Number(input.min)) /
+               (Number(input.max) - Number(input.min))) * 100;
+  input.style.setProperty('--pct', `${pct}%`);
+  ui.toleranceValue.textContent = Number(input.value).toFixed(2);
+}
+
+function setMode(mode, quiet) {
+  state.mode = mode;
+  for (const button of document.querySelectorAll('.seg')) {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-checked', active ? 'true' : 'false');
+  }
+  if (!quiet) ui.organizeLabel.textContent =
+    mode === 'move' ? 'Move into folders' : 'Sort into folders';
+}
+
+function renderSummary(status) {
   const stats = status.stats || {};
   const rows = [];
   if (stats.photos !== undefined) {
@@ -115,12 +271,12 @@ function renderStats(status) {
     rows.push(['Faces found', stats.faces ?? 0, '']);
     rows.push(['Groups', status.clusters ?? 0, '']);
     if (stats.seconds) {
-      rows.push(['Time', `${stats.seconds.toFixed(1)} s (${stats.img_per_s ?? 0} img/s)`, '']);
+      rows.push(['Time', `${stats.seconds.toFixed(1)} s · ${stats.img_per_s ?? 0} img/s`, '']);
     }
   }
   const results = status.results;
   if (results) {
-    rows.push(['Sorted into', `${Object.keys(results.folders).length} folder(s)`, 'ok']);
+    rows.push(['Folders', Object.keys(results.folders).length, 'ok']);
     rows.push(['Photos placed', results.files_placed, 'ok']);
     if (results.errors && results.errors.length) {
       rows.push(['Errors', results.errors.length, 'danger']);
@@ -138,205 +294,401 @@ function renderStats(status) {
   ui.summaryPanel.hidden = rows.length === 0;
 }
 
-function renderChips(status) {
-  ui.chips.replaceChildren();
-  const stats = status.stats || {};
-  const chips = [
-    ['Photos', stats.photos],
-    ['Faces', stats.faces],
-    ['Groups', status.clusters],
-    ['Named', status.named],
+function renderScanStats(stats) {
+  const pills = [
+    ['photos', stats.photos], ['faces', stats.faces], ['groups', stats.groups],
   ].filter(([, value]) => value !== undefined && value !== null);
-  for (const [label, value] of chips) {
-    const chip = document.createElement('span');
-    chip.className = 'chip';
+  ui.scanStats.replaceChildren();
+  for (const [label, value] of pills) {
+    const pill = document.createElement('li');
+    pill.className = 'stat-pill';
     const strong = document.createElement('b');
     strong.textContent = String(value);
-    chip.append(strong, document.createTextNode(` ${label.toLowerCase()}`));
-    ui.chips.append(chip);
+    pill.append(strong, document.createTextNode(label));
+    ui.scanStats.append(pill);
   }
 }
 
-/* ------------------------------------------------------------- scanning */
+/* =========================================================== scanning */
 
 async function startScan() {
   const settings = readSettings();
   if (!settings.input_folder || !settings.output_folder) {
-    toast('Choose an input and an output folder first.', 'error');
+    toast('Choose an input and an output folder first.', 'warn', 'alert');
+    (settings.input_folder ? ui.output : ui.input).focus();
     return;
   }
+  state.outputFolder = settings.output_folder;
   state.clusters = [];
+  state.names.clear();
   ui.clusters.replaceChildren();
-  ui.empty.hidden = false;
+  setView('scanning');
   setBusy(true);
+  ui.previewImg.removeAttribute('src');
+  ui.previewName.textContent = '—';
+  ui.scanPercent.textContent = '0%';
+  ui.scanBar.style.width = '0%';
+  renderScanStats({});
+
   try {
     await bridge.api.scan(settings);
-    ui.progressPanel.hidden = false;
-    ui.progressBar.style.width = '0%';
-    ui.progressLabel.textContent = 'Starting…';
-    ui.progressCount.textContent = '0 / 0';
-    pollStatus();
+    setEngine('busy', 'scanning');
+    clearTimeout(state.poll);      // never run two poll chains at once
+    poll();
   } catch (error) {
     setBusy(false);
+    setEngine('error', 'idle');
+    setView('configure');
     toast(String(error.message || error), 'error');
   }
 }
 
-function pollStatus() {
-  clearTimeout(state.pollTimer);
-  state.pollTimer = setTimeout(async () => {
-    let status;
-    try {
-      status = await bridge.api.status();
-    } catch (error) {
-      ui.progressLabel.textContent = 'Lost contact with the engine…';
-      pollStatus();
-      return;
-    }
-    applyStatus(status);
-    renderChips(status);
+async function poll() {
+  if (state.pollBusy) return;
+  state.pollBusy = true;
+  let status = null;
+  try {
+    status = await bridge.api.status();
+  } catch (error) {
+    state.pollBusy = false;
+    state.poll = setTimeout(poll, 700);
+    return;
+  }
+  state.pollBusy = false;
+  applyStatus(status);
 
-    if (status.scanning) {
-      const total = status.total || 0;
-      const done = status.processed || 0;
-      const percent = total ? Math.min(100, (done / total) * 100) : 0;
-      ui.progressBar.style.width = `${percent}%`;
-      ui.progressCount.textContent = `${done} / ${total}`;
-      ui.progressLabel.textContent = status.current
-        ? `Scanning ${status.current}`
-        : (status.phase || 'Scanning…');
-      pollStatus();
-      return;
-    }
+  if (status.scanning) {
+    setView('scanning');
+    setEngine('busy', 'scanning');
+    const total = status.total || 0;
+    const done = status.processed || 0;
+    const pct = total ? Math.min(100, (done / total) * 100) : 0;
+    ui.scanBar.style.width = `${pct}%`;
+    ui.scanBarWrap.setAttribute('aria-valuenow', String(Math.round(pct)));
+    ui.scanPercent.textContent = `${Math.round(pct)}%`;
+    ui.scanText.textContent = total
+      ? `Processing image ${done} of ${total} — ${status.current || '…'}`
+      : (status.phase || 'Scanning…');
+    ui.mini.hidden = false;
+    ui.miniBar.style.width = `${pct}%`;
+    ui.miniCount.textContent = `${done} / ${total}`;
+    ui.miniLabel.textContent = 'Scanning photos';
+    showPreview(status.current);
+    announce(`Scanning ${done} of ${total}`);
+    state.poll = setTimeout(poll, 400);
+    return;
+  }
 
-    setBusy(false);
-    if (status.state === 'error') {
-      ui.progressLabel.textContent = 'Scan failed';
-      toast(status.error || 'The scan failed.', 'error');
-      return;
-    }
-    if (status.state === 'ready' || status.state === 'done') {
-      ui.progressBar.style.width = '100%';
-      ui.progressLabel.textContent = status.phase || 'Ready';
-      await loadClusters();
-    }
-  }, 450);
+  if (status.organizing) {
+    setView('review');
+    setEngine('busy', 'sorting');
+    const info = status.organize || {};
+    const total = info.total || 0;
+    const done = info.done || 0;
+    const pct = total ? Math.min(100, (done / total) * 100) : 0;
+    ui.mini.hidden = false;
+    ui.miniBar.style.width = `${pct}%`;
+    ui.miniCount.textContent = `${done} / ${total}`;
+    ui.miniLabel.textContent = `Sorting ${info.current || 'photos'}`;
+    toast(`Copying photos — ${done} of ${total}`, '', 'folder');
+    state.poll = setTimeout(poll, 400);
+    return;
+  }
+
+  // settled
+  clearTimeout(state.poll);
+  setBusy(false);
+  ui.mini.hidden = true;
+  setEngine('ready', 'ready');
+
+  if (status.state === 'error') {
+    setView('configure');
+    toast(status.error || 'The scan failed.', 'error');
+    return;
+  }
+  if (status.results) {
+    showDone(status);
+    return;
+  }
+  await loadClusters();
 }
+
+/** Live preview of the photo being processed (GET /thumb, scoped by the engine). */
+async function showPreview(name) {
+  if (!name || name === state.lastPreview) return;
+  state.lastPreview = name;
+  ui.previewName.textContent = name;
+  try {
+    const dataUrl = await bridge.preview(name);
+    if (dataUrl && state.lastPreview === name) {
+      ui.previewImg.src = dataUrl;
+      ui.previewImg.style.animation = 'none';
+      void ui.previewImg.offsetWidth;      // restart the crossfade
+      ui.previewImg.style.animation = '';
+    }
+  } catch (error) {
+    /* a missing preview is not worth a toast */
+  }
+}
+
+/* ============================================================ review */
 
 async function loadClusters() {
   try {
     const payload = await bridge.api.clusters();
     state.clusters = payload.clusters || [];
-    renderClusters(state.clusters);
-    ui.empty.hidden = state.clusters.length > 0;
-    ui.title.textContent = 'Review the groups';
-    ui.sub.textContent = state.clusters.length
-      ? `${state.clusters.length} group(s) — name each one, then sort.`
-      : 'No faces were found in this folder.';
+    state.names.clear();
+    for (const cluster of state.clusters) {
+      if (cluster.name) state.names.set(cluster.id, cluster.name);
+    }
+    renderClusters();
+    setView('review');
+    setEngine('ready', 'ready');
     ui.organize.disabled = state.clusters.length === 0;
+    if (!state.clusters.length) {
+      toast('No faces were found in that folder.', 'warn');
+    } else {
+      celebrateIfEnabled(26);
+    }
   } catch (error) {
     toast(String(error.message || error), 'error');
   }
 }
 
-/* -------------------------------------------------------------- clusters */
-
-function renderClusters(clusters) {
+function renderClusters() {
+  const query = ui.clusterSearch.value.trim().toLowerCase();
   ui.clusters.replaceChildren();
-  for (const cluster of clusters) {
-    ui.clusters.append(buildCard(cluster));
+  let shown = 0;
+  state.clusters.forEach((cluster) => {
+    const name = (state.names.get(cluster.id) || '').toLowerCase();
+    if (query && !name.includes(query)) return;
+    const card = buildCard(cluster);
+    card.style.animationDelay = `${Math.min(shown, 12) * 45}ms`;
+    ui.clusters.append(card);
+    shown += 1;
+  });
+  if (!shown) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.style.padding = '24px';
+    empty.textContent = query ? 'No group matches that filter.' : 'No groups yet.';
+    ui.clusters.append(empty);
   }
+  ui.organize.disabled = state.clusters.length === 0;
 }
 
 function buildCard(cluster) {
-  const card = document.createElement('article');
-  card.className = 'card';
+  const name = state.names.get(cluster.id) || '';
+  const wrap = document.createElement('div');
+  wrap.className = 'flip';
+  wrap.dataset.cluster = String(cluster.id);
+  const inner = document.createElement('div');
+  inner.className = 'flip-inner';
+  wrap.append(inner);
 
-  const head = document.createElement('div');
-  head.className = 'card-head';
-  const title = document.createElement('span');
-  title.className = 'card-title';
-  title.textContent = `Group ${cluster.id + 1}`;
-  const badge = document.createElement('span');
-  badge.className = `badge ${cluster.name ? (cluster.auto ? 'auto' : '') : 'unnamed'}`;
-  badge.textContent = cluster.name
-    ? (cluster.auto ? 'remembered' : 'named')
-    : 'not named';
-  head.append(title, badge);
-
-  const meta = document.createElement('span');
+  /* ---- front ---- */
+  const front = document.createElement('div');
+  front.className = 'flip-face front';
+  const top = document.createElement('div');
+  top.className = 'card-top';
+  const idBox = document.createElement('div');
+  const idText = document.createElement('div');
+  idText.className = 'card-id';
+  // once named, the person IS the card title; the group number stays in the meta
+  idText.textContent = name || `Group ${cluster.id + 1}`;
+  const meta = document.createElement('div');
   meta.className = 'card-meta';
-  meta.textContent = `${cluster.size} face${cluster.size === 1 ? '' : 's'} in `
-    + `${cluster.photos} photo${cluster.photos === 1 ? '' : 's'}`;
+  meta.textContent = (name ? `Group ${cluster.id + 1} · ` : '')
+    + `${plural(cluster.size, 'face')} · ${plural(cluster.photos, 'photo')}`;
+  idBox.append(idText, meta);
+  const badge = document.createElement('span');
+  badge.className = `badge ${name ? (cluster.auto ? 'auto' : 'named') : 'unnamed'}`;
+  badge.textContent = name ? (cluster.auto ? 'remembered' : 'named') : 'not named';
+  top.append(idBox, badge);
 
-  const faces = document.createElement('div');
-  faces.className = 'faces';
+  const grid = document.createElement('div');
+  grid.className = 'thumb-grid';
   for (const face of cluster.faces) {
     const tile = document.createElement('button');
     tile.type = 'button';
-    tile.className = 'face';
+    tile.className = 'thumb';
     tile.title = `${face.photo} — click to enlarge`;
     if (face.thumb) {
       const image = document.createElement('img');
       image.src = face.thumb;
       image.alt = `Face from ${face.photo}`;
+      image.loading = 'lazy';
+      image.decoding = 'async';
       tile.append(image);
     }
-    const caption = document.createElement('span');
-    caption.className = 'face-name';
+    const caption = document.createElement('figcaption');
     caption.textContent = face.photo;
     tile.append(caption);
-    tile.addEventListener('click', () => openLightbox(face));
-    faces.append(tile);
+    tile.addEventListener('click', (event) => {
+      event.stopPropagation();
+      openLightbox(face);
+    });
+    grid.append(tile);
   }
 
-  const row = document.createElement('div');
-  row.className = 'card-name-row';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = cluster.name || '';
-  input.placeholder = 'Name this person…';
-  input.setAttribute('aria-label', `Name for group ${cluster.id + 1}`);
-  const save = document.createElement('button');
-  save.type = 'button';
-  save.className = 'primary';
-  save.textContent = 'Save';
-  save.addEventListener('click', () => saveName(cluster, input.value, badge, card));
-  input.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      saveName(cluster, input.value, badge, card);
-    }
+  const actions = document.createElement('div');
+  actions.className = 'card-actions';
+  const nameBtn = document.createElement('button');
+  nameBtn.type = 'button';
+  nameBtn.className = 'btn primary';
+  nameBtn.append(icon('tag'), document.createTextNode(name ? 'Rename' : 'Name'));
+  nameBtn.addEventListener('click', () => openModal(cluster));
+  const flipBtn = document.createElement('button');
+  flipBtn.type = 'button';
+  flipBtn.className = 'btn ghost';
+  flipBtn.append(icon('flip'), document.createTextNode('Details'));
+  flipBtn.setAttribute('aria-label', `Show details for group ${cluster.id + 1}`);
+  flipBtn.addEventListener('click', () => {
+    wrap.classList.toggle('is-flipped');
+    flipBtn.setAttribute('aria-pressed', wrap.classList.contains('is-flipped') ? 'true' : 'false');
   });
-  row.append(input, save);
+  actions.append(nameBtn, flipBtn);
+  front.append(top, grid, actions);
 
-  card.append(head, meta, faces, row);
-  return card;
+  /* ---- back ---- */
+  const back = document.createElement('div');
+  back.className = 'flip-face back';
+  const backTitle = document.createElement('div');
+  backTitle.className = 'card-id';
+  backTitle.textContent = name || `Group ${cluster.id + 1}`;
+  const details = document.createElement('div');
+  details.className = 'detail-list';
+  const rows = [
+    ['Faces', cluster.size],
+    ['Photos', cluster.photos],
+    ['Destination', `output/${name || '_unknown'}`],
+    ['Status', name ? (cluster.auto ? 'remembered from the name database' : 'named just now') : 'goes to _unknown'],
+  ];
+  for (const [label, value] of rows) {
+    const row = document.createElement('div');
+    row.className = 'detail-row';
+    const span = document.createElement('span');
+    span.textContent = label;
+    const strong = document.createElement('b');
+    strong.textContent = String(value);
+    row.append(span, strong);
+    details.append(row);
+  }
+  const photos = document.createElement('ul');
+  photos.className = 'photo-list';
+  for (const face of cluster.faces) {
+    const item = document.createElement('li');
+    item.textContent = face.photo;
+    photos.append(item);
+  }
+  const flipBack = document.createElement('button');
+  flipBack.type = 'button';
+  flipBack.className = 'btn ghost';
+  flipBack.append(icon('refresh'), document.createTextNode('Back'));
+  flipBack.addEventListener('click', () => wrap.classList.remove('is-flipped'));
+  back.append(backTitle, details, photos, flipBack);
+
+  inner.append(front, back);
+  return wrap;
 }
 
-async function saveName(cluster, value, badge, card) {
+/* ============================================================= modal */
+
+function openModal(cluster) {
+  state.current = cluster;
+  state.lastFocus = document.activeElement;
+  ui.modalThumbs.replaceChildren();
+  const faces = (cluster.faces || []).filter((face) => face.thumb).slice(0, 3);
+  if (faces.length) {
+    for (const face of faces) {
+      const image = document.createElement('img');
+      image.src = face.thumb;
+      image.alt = `Face from ${face.photo}`;
+      ui.modalThumbs.append(image);
+    }
+  } else {
+    const placeholder = document.createElement('div');
+    placeholder.className = 'placeholder';
+    placeholder.append(icon('users'));
+    ui.modalThumbs.append(placeholder);
+  }
+  ui.modalTitle.textContent = (state.names.get(cluster.id))
+    ? 'Rename this person' : 'Who is this?';
+  ui.modalSub.textContent = `Group ${cluster.id + 1} · ${plural(cluster.size, 'face')} in `
+    + `${plural(cluster.photos, 'photo')}`;
+  ui.modalName.value = state.names.get(cluster.id) || '';
+  ui.modalError.hidden = true;
+  ui.modalSuggestions.replaceChildren();
+  const suggestions = suggestNames(state.names);
+  for (const suggestion of suggestions) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'suggestion';
+    chip.textContent = suggestion;
+    chip.addEventListener('click', () => { ui.modalName.value = suggestion; });
+    ui.modalSuggestions.append(chip);
+  }
+  ui.modalLayer.hidden = false;
+  document.body.style.overflow = 'hidden';
+  requestAnimationFrame(() => ui.modalName.focus());
+}
+
+function suggestNames(taken) {
+  const common = ['Alex', 'Sam', 'Jordan', 'Casey', 'Taylor', 'Morgan'];
+  return common.filter((name) => !taken.has(name)).slice(0, 4);
+}
+
+function closeModal() {
+  ui.modalLayer.hidden = true;
+  document.body.style.overflow = '';
+  state.current = null;
+  if (state.lastFocus && state.lastFocus.focus) state.lastFocus.focus();
+}
+
+async function saveModal(name) {
+  const cluster = state.current;
+  if (!cluster) return;
   try {
-    const result = await bridge.api.nameCluster(cluster.id, value.trim());
-    const named = Boolean(result.name);
-    badge.className = `badge ${named ? (result.remembered ? 'auto' : '') : 'unnamed'}`;
-    badge.textContent = named
-      ? (result.remembered ? 'remembered' : 'named')
-      : 'not named';
-    toast(named ? `Group ${cluster.id + 1} → ${result.name}` :
-                   `Group ${cluster.id + 1} will go to the unknown folder`, 'ok');
+    const result = await bridge.api.nameCluster(cluster.id, (name || '').trim());
+    if (result.name) {
+      state.names.set(cluster.id, result.name);
+      toast(`${result.name} — ${result.remembered ? 'remembered for next time' : 'named'}`, 'ok');
+      pulseCard(cluster.id);
+      celebrateIfEnabled(14);
+    } else {
+      state.names.delete(cluster.id);
+      toast(`Group ${cluster.id + 1} goes to the unknown folder`, 'warn');
+    }
+    closeModal();
+    renderClusters();
   } catch (error) {
-    toast(String(error.message || error), 'error');
+    ui.modalError.textContent = String(error.message || error);
+    ui.modalError.hidden = false;
   }
 }
+
+function pulseCard(clusterId) {
+  // match on the data attribute: indices shift when a filter is active, and the
+  // visible title becomes the person's name once it is named
+  const target = ui.clusters.querySelector(`.flip[data-cluster="${clusterId}"]`);
+  if (!target) return;
+  target.animate(
+    [{ transform: 'scale(1)' }, { transform: 'scale(1.035)' }, { transform: 'scale(1)' }],
+    { duration: 420, easing: 'cubic-bezier(.34,1.56,.64,1)' },
+  );
+}
+
+/* ========================================================= lightbox */
 
 function openLightbox(face) {
   const box = document.createElement('div');
   box.className = 'lightbox';
   const image = document.createElement('img');
-  if (face.thumb) image.src = face.thumb;
+  image.src = face.thumb || '';          // face crop first: instant feedback
+  image.alt = `Photo ${face.photo}`;
   const caption = document.createElement('div');
   caption.className = 'caption';
-  caption.textContent = `${face.photo}  ·  ${face.path}`;
+  caption.textContent = face.path || face.photo;
   box.append(image, caption);
   box.addEventListener('click', () => box.remove());
   document.addEventListener('keydown', function onKey(event) {
@@ -346,64 +698,234 @@ function openLightbox(face) {
     }
   });
   document.body.append(box);
+
+  // then swap in the whole photo (GET /photo, same scoping as /thumb)
+  bridge.photo(face.photo).then((dataUrl) => {
+    if (dataUrl && box.contains(image)) image.src = dataUrl;
+  }).catch(() => { /* the crop is a fine fallback */ });
 }
 
-/* ------------------------------------------------------------- organize */
+/* ========================================================= organize */
 
 async function runOrganize() {
+  if (state.clusters.length === 0) return;
   setBusy(true);
-  ui.organize.disabled = true;
-  // The engine snapshots the names when /organize starts, so lock the fields
-  // while it copies — otherwise an edit would look like it took effect but
-  // not appear in the folders it is sorting right now.
-  const nameInputs = [...document.querySelectorAll('.card input, .card .primary')];
-  nameInputs.forEach((input) => { input.disabled = true; });
+  setEngine('busy', 'sorting');
+  ui.mini.hidden = false;
+  ui.miniBar.style.width = '0%';
+  ui.miniLabel.textContent = 'Sorting photos';
   try {
-    const results = await bridge.api.organize(state.mode);
-    const folders = Object.entries(results.folders)
-      .map(([name, count]) => `${name} (${count})`).join(', ');
-    toast(`Sorted ${results.files_placed} photo(s) into ${folders || 'no folders'}`,
-          results.ok ? 'ok' : 'error');
-    const status = await bridge.api.status();
-    applyStatus(status);
-    renderChips(status);
+    await bridge.api.organize(state.mode);
+    clearTimeout(state.poll);
+    poll();
   } catch (error) {
-    toast(String(error.message || error), 'error');
-  } finally {
     setBusy(false);
-    nameInputs.forEach((input) => { input.disabled = false; });
-    ui.organize.disabled = state.clusters.length === 0;
+    setEngine('ready', 'ready');
+    ui.mini.hidden = true;
+    toast(String(error.message || error), 'error');
   }
 }
 
-/* ------------------------------------------------------------------ logs */
+/* ============================================================== done */
 
-function appendLog(line) {
-  ui.logPanel.hidden = false;
-  ui.log.textContent += `${line}\n`;
-  if (ui.log.textContent.length > 20000) {
-    ui.log.textContent = ui.log.textContent.slice(-16000);
+function showDone(status) {
+  const results = status.results || {};
+  state.outputFolder = results.output_folder || state.outputFolder;
+  setView('done');
+
+  const stats = [
+    [results.files_placed ?? 0, 'photos placed'],
+    [Object.keys(results.folders || {}).length, 'folders created'],
+    [results.copies_written ?? 0, 'copies written'],
+    [(status.stats && status.stats.faces) || 0, 'faces found'],
+  ];
+  ui.doneStats.replaceChildren();
+  stats.forEach(([value, label], index) => {
+    const box = document.createElement('div');
+    box.className = 'done-stat';
+    box.style.animationDelay = `${140 + index * 80}ms`;
+    const strong = document.createElement('b');
+    strong.textContent = String(value);
+    const span = document.createElement('span');
+    span.textContent = label;
+    box.append(strong, span);
+    ui.doneStats.append(box);
+  });
+
+  ui.folderList.replaceChildren();
+  const entries = Object.entries(results.folders || {}).sort((a, b) => b[1] - a[1]);
+  for (const [name, count] of entries) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'folder-row';
+    row.append(icon('folder'));
+    const label = document.createElement('span');
+    label.textContent = name;
+    const amount = document.createElement('b');
+    amount.textContent = String(count);
+    row.append(label, amount);
+    row.addEventListener('click', () => bridge.openPath(results.output_folder));
+    ui.folderList.append(row);
   }
-  ui.log.scrollTop = ui.log.scrollHeight;
+  if (!entries.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = 'Nothing was placed.';
+    ui.folderList.append(empty);
+  }
+
+  $('done-sub').textContent = results.mode === 'move'
+    ? `${plural(results.files_placed, 'photo')} moved into ${plural(entries.length, 'folder')}.`
+    : `${plural(results.files_placed, 'photo')} copied into ${plural(entries.length, 'folder')}.`;
+
+  toast(`Sorted ${plural(results.files_placed, 'photo')}`, 'ok');
+  if (state.celebrate) burst(120);
 }
 
-/* -------------------------------------------------------------- wiring */
+/* ========================================================== confetti */
 
-function setMode(mode, quiet = false) {
-  state.mode = mode;
-  for (const button of document.querySelectorAll('.seg')) {
-    const active = button.dataset.mode === mode;
-    button.classList.toggle('is-active', active);
-    button.setAttribute('aria-checked', active ? 'true' : 'false');
-  }
-  if (!quiet) toast(`Sorting mode: ${mode}`);
+let confettiFrame = null;
+
+function burst(count = 90) {
+  if (reducedMotion) return;
+  const canvas = ui.confetti;
+  const context = canvas.getContext('2d');
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = innerWidth * ratio;
+  canvas.height = innerHeight * ratio;
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  canvas.classList.add('is-on');
+
+  const colors = ['#3b82f6', '#7c5cff', '#10b981', '#f59e0b', '#ef4444', '#06b6d4'];
+  const pieces = Array.from({ length: count }, () => ({
+    x: Math.random() * innerWidth,
+    y: -20 - Math.random() * innerHeight * 0.4,
+    w: 6 + Math.random() * 6,
+    h: 8 + Math.random() * 8,
+    vy: 2 + Math.random() * 3.4,
+    vx: -1.2 + Math.random() * 2.4,
+    rot: Math.random() * Math.PI,
+    vr: -0.12 + Math.random() * 0.24,
+    color: colors[(Math.random() * colors.length) | 0],
+  }));
+
+  const started = performance.now();
+  cancelAnimationFrame(confettiFrame);
+  const tick = (now) => {
+    const elapsed = now - started;
+    context.clearRect(0, 0, innerWidth, innerHeight);
+    let alive = false;
+    for (const piece of pieces) {
+      piece.x += piece.vx;
+      piece.y += piece.vy;
+      piece.vy += 0.045;              // gentle gravity
+      piece.rot += piece.vr;
+      if (piece.y < innerHeight + 30) alive = true;
+      context.save();
+      context.translate(piece.x, piece.y);
+      context.rotate(piece.rot);
+      context.fillStyle = piece.color;
+      context.globalAlpha = Math.max(0, 1 - elapsed / 4200);
+      context.fillRect(-piece.w / 2, -piece.h / 2, piece.w, piece.h);
+      context.restore();
+    }
+    if (alive && elapsed < 4200) {
+      confettiFrame = requestAnimationFrame(tick);
+    } else {
+      canvas.classList.remove('is-on');
+      context.clearRect(0, 0, innerWidth, innerHeight);
+    }
+  };
+  confettiFrame = requestAnimationFrame(tick);
 }
+
+function celebrateIfEnabled(pieces) {
+  if (state.celebrate) burst(pieces);
+}
+
+/* ===================================================== scroll-to-top */
+
+function updateScrollTop() {
+  const offset = ui.stage.scrollTop;
+  ui.scrollTop.hidden = offset < 220;
+  ui.scrollTop.classList.toggle('is-on', offset >= 220);
+}
+
+ui.stage.addEventListener('scroll', updateScrollTop, { passive: true });
+ui.scrollTop.addEventListener('click', () => {
+  ui.stage.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+});
+
+/* ===================================================== drag & drop */
+
+let dragDepth = 0;
+
+function setupDragAndDrop() {
+  const hasFiles = (event) => Array.from(event.dataTransfer?.types || []).includes('Files');
+
+  window.addEventListener('dragenter', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth += 1;
+    ui.dragVeil.classList.add('is-on');
+    ui.dropzone.classList.add('is-over');
+  });
+  window.addEventListener('dragover', (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+  });
+  window.addEventListener('dragleave', (event) => {
+    if (!hasFiles(event)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) {
+      ui.dragVeil.classList.remove('is-on');
+      ui.dropzone.classList.remove('is-over');
+    }
+  });
+  window.addEventListener('drop', async (event) => {
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    dragDepth = 0;
+    ui.dragVeil.classList.remove('is-on');
+    ui.dropzone.classList.remove('is-over');
+    const file = event.dataTransfer.files[0];
+    if (!file) return;
+    // Electron >= 32 removed File.path: the preload resolves it via webUtils.
+    const path = await bridge.pathForFile(file);
+    if (path) {
+      ui.input.value = path;
+      ui.dropzone.classList.add('has-folder');
+      toast(`Using ${path.split(/[\\/]/).filter(Boolean).pop()}`, 'ok', 'folder');
+    }
+  });
+
+  ui.dropzone.addEventListener('click', pickInputFolder);
+  ui.dropzone.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      pickInputFolder();
+    }
+  });
+}
+
+async function pickInputFolder() {
+  const folder = await bridge.pickFolder('input');
+  if (folder) {
+    ui.input.value = folder;
+    ui.dropzone.classList.add('has-folder');
+  }
+}
+
+/* ============================================================= wiring */
 
 function wire() {
   ui.tolerance.addEventListener('input', () => {
     ui.tolerance.dataset.touched = '1';
-    ui.toleranceValue.textContent = Number(ui.tolerance.value).toFixed(2);
+    syncRange();
   });
+  syncRange();
+
   for (const field of [ui.minFaces, ui.workers]) {
     field.addEventListener('input', () => { field.dataset.touched = '1'; });
   }
@@ -411,10 +933,7 @@ function wire() {
     button.addEventListener('click', () => setMode(button.dataset.mode));
   }
 
-  ui.pickInput.addEventListener('click', async () => {
-    const folder = await bridge.pickFolder('input');
-    if (folder) ui.input.value = folder;
-  });
+  ui.pickInput.addEventListener('click', pickInputFolder);
   ui.pickOutput.addEventListener('click', async () => {
     const folder = await bridge.pickFolder('output');
     if (folder) ui.output.value = folder;
@@ -422,31 +941,78 @@ function wire() {
 
   ui.scan.addEventListener('click', startScan);
   ui.organize.addEventListener('click', runOrganize);
+  ui.clusterSearch.addEventListener('input', renderClusters);
+  ui.autoCelebrate.addEventListener('change', () => {
+    state.celebrate = ui.autoCelebrate.checked;
+  });
+
+  ui.doneOpen.addEventListener('click', () => bridge.openPath(state.outputFolder));
+  ui.doneAgain.addEventListener('click', () => {
+    state.clusters = [];
+    state.names.clear();
+    ui.clusters.replaceChildren();
+    setView('configure');
+    toast('Pick another folder to scan', '', 'refresh');
+  });
+  ui.doneCelebrate.addEventListener('click', () => burst(140));
+
+  // modal
+  ui.modalSave.addEventListener('click', () => saveModal(ui.modalName.value));
+  ui.modalSkip.addEventListener('click', () => saveModal(''));
+  for (const node of document.querySelectorAll('[data-close-modal]')) {
+    node.addEventListener('click', closeModal);
+  }
+  ui.modalName.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); saveModal(ui.modalName.value); }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !ui.modalLayer.hidden) closeModal();
+  });
+
+  // log panel
   ui.logToggle.addEventListener('click', () => {
     ui.log.hidden = !ui.log.hidden;
-    ui.logToggle.textContent = ui.log.hidden ? 'show' : 'hide';
+    ui.logToggle.title = ui.log.hidden ? 'Show engine log' : 'Hide engine log';
   });
 
-  bridge.onLog(appendLog);
-  bridge.onPickInputRequested(async () => {
-    const folder = await bridge.pickFolder('input');
-    if (folder) ui.input.value = folder;
+  // narrow layout drawer
+  ui.drawerToggle.addEventListener('click', () => {
+    const open = ui.sidebar.classList.toggle('is-open');
+    ui.drawerToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
+
+  // engine events
+  bridge.onLog(appendLog);
+  bridge.onPickInputRequested(pickInputFolder);
 
   bridge.onReady(async (payload) => {
-    state.engineReady = true;
+    setEngine('ready', 'ready');
     applyStatus(payload.status);
-    renderChips(payload.status || {});
     try {
       const status = await bridge.api.status();
       applyStatus(status);
-      // A scan from a previous session is still valid data to show.
-      if (status.state === 'ready' || status.state === 'done') await loadClusters();
+      if (status.state === 'ready') await loadClusters();
+      if (status.state === 'done' && status.results) showDone(status);
     } catch (error) {
-      /* engine not answering yet; the scan button reports the real error */
+      /* the scan button reports any real problem */
     }
     if (bridge.smoke) bridge.smoke();
   });
 }
 
+function appendLog(line) {
+  ui.logPanel.hidden = false;
+  ui.log.textContent += `${line}\n`;
+  if (ui.log.textContent.length > 24000) {
+    ui.log.textContent = ui.log.textContent.slice(-18000);
+  }
+  ui.log.scrollTop = ui.log.scrollHeight;
+}
+
+/* ============================================================== boot */
+
+initTheme();
+setupDragAndDrop();
 wire();
+setView('configure');
+setEngine('connecting', 'connecting');

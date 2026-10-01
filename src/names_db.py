@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,9 +27,60 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = "./facesort_names.db"
+#: Filename inside the per-user data directory.
+DB_FILENAME = "facesort_names.db"
+#: Folder created inside the platform's per-user data location.
+APP_DIR_NAME = "FaceSort"
+
+#: Historical spelling: treated as "use the per-user default" so existing
+#: ``config.yaml`` files (which say ``./facesort_names.db``) keep working
+#: without writing into whatever directory the app happens to run from.
+LEGACY_DEFAULT_NAMES = ("./" + DB_FILENAME, DB_FILENAME)
+
 DEFAULT_TOLERANCE = 0.5
 MAX_SAMPLE_PATHS = 8
+
+
+def user_data_dir() -> Path:
+    """Writable per-user data directory — never the install folder.
+
+    The engine is frozen next to the app, so the process working directory can
+    be read-only (Program Files) or a developer's source tree.  The database
+    has to live somewhere the user owns.
+    """
+    override = os.environ.get("FACEORG_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        root = Path(base) if base else Path.home() / "AppData" / "Local"
+    elif sys.platform == "darwin":
+        root = Path.home() / "Library" / "Application Support"
+    else:
+        root = Path(os.environ.get("XDG_DATA_HOME")
+                    or (Path.home() / ".local" / "share"))
+    return root / APP_DIR_NAME
+
+
+def default_db_path() -> Path:
+    """Absolute path of the name database inside :func:`user_data_dir`."""
+    return user_data_dir() / DB_FILENAME
+
+
+def resolve_db_path(raw: object) -> Path:
+    """Turn a configured ``names_db`` value into a concrete path.
+
+    An explicit path (absolute, or relative like ``./data/names.db``) is
+    honoured as given; the legacy default name resolves to the per-user
+    location instead of the current working directory.
+    """
+    text = str(raw).strip()
+    if text in LEGACY_DEFAULT_NAMES:
+        return default_db_path()
+    return Path(text).expanduser()
+
+
+DEFAULT_DB_PATH = str(default_db_path())
 
 __all__ = [
     "Person",
@@ -35,6 +88,9 @@ __all__ = [
     "NamesDB",
     "open_names_db",
     "cosine_distance",
+    "resolve_db_path",
+    "user_data_dir",
+    "default_db_path",
     "DEFAULT_DB_PATH",
 ]
 
@@ -352,15 +408,21 @@ def open_names_db(config: Optional[Dict] = None) -> Optional[NamesDB]:
     broken DB must never stop the run.
     """
     config = config or {}
-    raw = config.get("names_db", DEFAULT_DB_PATH)
+    raw = config.get("names_db", DB_FILENAME)
     if raw is None or str(raw).strip().lower() in ("", "none", "false", "off"):
         logger.info("Name database disabled (names_db is empty).")
         return None
+    # DB_FILENAME / "./DB_FILENAME" are resolved lazily by resolve_db_path, so a
+    # changed FACEORG_DATA_DIR is honoured even in a long-lived process
+    path = resolve_db_path(raw)
     try:
-        return NamesDB(str(raw))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        db = NamesDB(str(path))
+        logger.info("Name database: %s", path)
+        return db
     except (OSError, sqlite3.Error) as exc:
         logger.warning(
             "Name database %r is unavailable (%s); continuing without "
-            "auto-labelling.", raw, exc,
+            "auto-labelling.", path, exc,
         )
         return None

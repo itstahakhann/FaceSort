@@ -110,7 +110,7 @@ Defaults live in [`config.yaml`](config.yaml):
 | `mode` | `copy` | `copy` or `move` |
 | `detector_backend` | `retinaface` | `retinaface` / `dlib_hog` / `dlib_cnn` |
 | `unknown_folder` | `_unknown` | Folder for skipped clusters |
-| `names_db` | `./facesort_names.db` | Remembered people (SQLite); empty disables auto-labelling |
+| `names_db` | `./facesort_names.db` | Remembered people (SQLite); empty disables auto-labelling. The default spelling resolves to `%LOCALAPPDATA%\FaceSort\facesort_names.db` (`~/Library/Application Support/…`, `$XDG_DATA_HOME/…`), **not** the working directory; give an explicit path to override, or set `FACEORG_DATA_DIR` |
 | `workers` | `0` | Worker processes for the vision stage: `0` = auto (`cpu_count // 2`, max 4), `1` = single process |
 
 Supported image formats: `jpg`, `jpeg`, `png`, `bmp`, `webp` (plus `heic`
@@ -167,6 +167,19 @@ Who is this? (name/skip)
 - Use `--no-db` to ignore the database for one run, or set
   `names_db:` to an empty value in `config.yaml` to disable it entirely.
 - The database is a plain local file — delete it to forget everyone.
+- **Where it lives:** the default (`./facesort_names.db`) is resolved to a
+  per-user, always-writable folder rather than the working directory, because
+  the engine is frozen *inside* the install directory — which is read-only on
+  a normal Windows install:
+
+  | Platform | Path |
+  |----------|------|
+  | Windows | `%LOCALAPPDATA%\FaceSort\facesort_names.db` |
+  | macOS | `~/Library/Application Support/FaceSort/facesort_names.db` |
+  | Linux | `$XDG_DATA_HOME/FaceSort/facesort_names.db` (else `~/.local/share/…`) |
+
+  `FACEORG_DATA_DIR` overrides the folder, and any explicit `names_db:` path
+  is used verbatim.
 
 ### Preview & cluster review (M2)
 
@@ -240,9 +253,35 @@ The desktop app is two pieces that meet on a loopback socket:
 | Piece | Lives in | Role |
 |-------|----------|------|
 | **Electron main** (`electron/main.js`) | `main.js` | Creates the window, spawns the engine, parses `PORT:<port>` from its stdout, polls `/status` until it answers, forwards engine log lines, and kills the whole engine process tree on quit |
-| **Preload bridge** (`electron/preload.js`) | `preload.js` | The only path from renderer to Node. Exposes five REST helpers, the log/ready events, a native folder picker, and app info — nothing else |
-| **Renderer** (`electron/renderer/`) | `index.html`, `styles.css`, `app.js` | Vanilla HTML/CSS/JS UI (no framework, no build step) |
+| **Preload bridge** (`electron/preload.js`) | `preload.js` | The only path from renderer to Node: the REST helpers, the log/ready events, the native folder picker, dropped-folder resolution, and `openPath` |
+| **Renderer** (`electron/renderer/`) | `index.html`, `styles.css`, `app.js` | The UI: no framework, no webfont, no build step — icons are an inline SVG sprite so the app stays fully offline |
 | **Engine** (`src/api/server.py`) | `python_build/dist/backend/backend.exe` (PyInstaller) | FastAPI app wrapping scanner → detector → clusterer → organizer + the SQLite name DB |
+
+### The interface
+
+Four views, driven by one small state machine:
+
+1. **Configure** — pick (or drag-and-drop) the input folder, choose the
+   destination, tune tolerance / min faces / worker processes and copy-vs-move.
+2. **Scan** — gradient progress bar with a live percentage and the current
+   file, a **live preview of the image being processed** (`GET /thumb`),
+   shimmer skeletons and an animated orb.
+3. **Review** — one card per group with cropped face thumbnails; hovering
+   lifts the card and zooms the grid, clicking a face opens it full-screen
+   (`/photo`), *Details* flips the card in 3D to show the destination folder
+   and every file, naming opens a slide-up dialog with suggestions, and a
+   toast confirms each name. Cards are titled by the person's name once set,
+   and the filter box narrows them as you type.
+4. **Finish** — animated checkmark, per-folder counts, "open output folder"
+   and an optional confetti celebration.
+
+Extras: dark/light theme (persisted, follows the OS on first run), toasts, a
+scroll-to-top button, a search filter for groups, an engine log panel, and
+`prefers-reduced-motion` support.
+
+Performance notes: animation is restricted to `transform`/`opacity` (no layout
+thrash), staggered card reveals are capped at 12 cards, and `will-change` is
+deliberately avoided.
 
 `main.js` resolves the engine from the mode it is running in, and logs the
 exact path before spawning it (this is the first thing to check when startup
@@ -479,7 +518,9 @@ gender-age graphs are never called, so they are left out.
 | `POST` | `/scan` | Validates the input folder, then scans on a background thread. Body: `input_folder`, `output_folder`, `tolerance`, `min_faces_per_cluster`, `mode`, `unknown_folder`, `workers`, `use_db` |
 | `GET` | `/clusters` | Every cluster with its faces: photo name, bbox, detection score and a cropped JPEG **data URL** thumbnail |
 | `POST` | `/name_cluster` | Name a group (`name_cluster: {cluster_id, name}`). Empty name → unknown folder; non-empty names are remembered in the SQLite DB for future scans |
-| `POST` | `/organize` | Copies/moves every photo into `output_folder/<person>/`, returning per-folder counts, files placed, duplicates written and errors |
+| `POST` | `/organize` | Copies/moves every photo into `output_folder/<person>/` **on a worker thread** — returns `{"started": true, "total": n}`; follow `/status` for per-file progress and read the report from `status.results` |
+| `GET` | `/thumb?name=` | Small (420 px) JPEG of one photo **inside the scanned folder** — the live scan preview. Scoped by design: only a *basename* is accepted and resolved inside the input folder, so the endpoint can never be used to read arbitrary files |
+| `GET` | `/photo?name=` | The same photo at 1600 px, for the review lightbox. Identical scoping; renders are memoised on `(path, mtime, size)` in a 64-entry cache |
 
 Interactive docs are available while the engine runs: `http://127.0.0.1:<port>/docs`.
 

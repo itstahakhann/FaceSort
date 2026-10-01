@@ -17,7 +17,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from .clusterer import FaceCluster
 
@@ -150,23 +150,31 @@ class PhotoOrganizer:
         )
 
     def organize(
-        self, named_clusters: Sequence[Tuple[Optional[str], FaceCluster]]
+        self,
+        named_clusters: Sequence[Tuple[Optional[str], FaceCluster]],
+        progress_cb: Optional[Callable[[int, int, Path], None]] = None,
     ) -> OrganizeSummary:
         """Place every photo of every cluster.
 
         ``named_clusters`` is a sequence of ``(name_or_None, cluster)``
         tuples, where ``name`` is whatever the user typed (raw input is
         normalised here).
+
+        ``progress_cb`` is optional and called as ``cb(done, total, source)``
+        after each source photo has been placed — the desktop UI drives its
+        progress bar with it.  A failing callback never aborts the run.
         """
         assignments: List[Tuple[Optional[str], Path]] = []
         for name, cluster in named_clusters:
             person = normalize_person_name(name)
             for path in cluster.image_paths:
                 assignments.append((person, path))
-        return self.organize_files(assignments)
+        return self.organize_files(assignments, progress_cb=progress_cb)
 
     def organize_files(
-        self, assignments: Iterable[Tuple[Optional[str], Union[str, Path]]]
+        self,
+        assignments: Iterable[Tuple[Optional[str], Union[str, Path]]],
+        progress_cb: Optional[Callable[[int, int, Path], None]] = None,
     ) -> OrganizeSummary:
         """Place ``(name_or_None, photo_path)`` pairs.
 
@@ -188,6 +196,8 @@ class PhotoOrganizer:
             logger.info("No photos to place.")
             return summary
 
+        placed = 0
+        total_sources = len(by_source)
         for source, wanted in by_source.items():
             folder_names = list(dict.fromkeys(wanted))  # one copy per folder
             if not source.is_file():
@@ -222,6 +232,14 @@ class PhotoOrganizer:
             if written == 0:
                 continue
             summary.files_placed += 1
+            placed += 1
+
+            if progress_cb is not None:
+                # progress is a UI nicety: never let it break the run
+                try:
+                    progress_cb(placed, total_sources, source)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("organize progress callback failed: %s", exc)
 
             if self.mode == "move":
                 if written != len(folder_names):

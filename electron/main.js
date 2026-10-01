@@ -416,6 +416,20 @@ ipcMain.handle('dialog:pick-folder', async (_event, kind) => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+/**
+ * Reveal a folder in the OS file manager. The renderer only ever passes paths
+ * the engine reported (its own output folder), and `shell.openPath` hands the
+ * path to the platform's file manager - it never executes anything.
+ */
+ipcMain.handle('shell:open-path', async (_event, target) => {
+  if (typeof target !== 'string' || !target) return 'no path';
+  try {
+    return await shell.openPath(target);
+  } catch (error) {
+    return String(error);
+  }
+});
+
 ipcMain.handle('app:info', () => ({
   version: app.getVersion(),
   packaged: IS_PACKAGED,

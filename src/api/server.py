@@ -44,7 +44,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -55,9 +55,9 @@ from ..face_model import (
     model_dir,
     models_installed,
 )
-from ..image_loader import load_image, scan_images
+from ..image_loader import is_supported, load_image, scan_images
 from ..main import DEFAULT_CONFIG, load_config, run_pipeline, save_named_cluster
-from ..names_db import open_names_db
+from ..names_db import DEFAULT_DB_PATH, open_names_db, resolve_db_path
 from ..organizer import PhotoOrganizer, normalize_person_name
 from ..ui.preview import face_crop
 
@@ -69,6 +69,14 @@ PORT_PREFIX = "PORT:"
 #: Rendered face thumbnail edge length in pixels (JPEG data URL).
 THUMB_CELL = 192
 THUMB_QUALITY = 80
+
+#: "Image currently being processed" preview served by GET /thumb.
+PREVIEW_EDGE = 420
+PREVIEW_QUALITY = 72
+
+#: Whole-photo render served by GET /photo (what the review screen enlarges).
+PHOTO_EDGE = 1600
+PHOTO_QUALITY = 82
 
 SERVICE = "facesort"
 API_VERSION = "1.0"
@@ -193,6 +201,7 @@ class ScanSession:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._thumbs: Dict[Tuple[str, Tuple[int, int, int, int]], Optional[str]] = {}
+        self.thumb_cache: Dict[Tuple[str, int, int], bytes] = {}
         self.config: Dict[str, Any] = {}
         self.reset()
 
@@ -211,7 +220,10 @@ class ScanSession:
             self.scan_stats: Dict[str, Any] = {}
             self.results: Optional[Dict[str, Any]] = None
             self.scan_seconds = 0.0
+            self.organize_done = 0
+            self.organize_total = 0
             self._thumbs.clear()
+            self.thumb_cache.clear()
         self._thread: Optional[threading.Thread] = None
         self._started_at = 0.0
 
@@ -256,6 +268,39 @@ class ScanSession:
             self.state = STATE_ERROR
             self.error = message
             self.phase = ""
+            self.current = ""
+
+    # -- organize bookkeeping ---------------------------------------------
+    def begin_organize(self, total: int) -> None:
+        """Switch to the organizing state with a per-file progress counter."""
+        with self._lock:
+            self.state = STATE_ORGANIZING
+            self.phase = "copying photos"
+            self.organize_total = total
+            self.organize_done = 0
+            self.current = ""
+            self._started_at = time.perf_counter()
+
+    def organize_progress(self, done: int, total: int, path: Any) -> None:
+        with self._lock:
+            self.organize_done = done
+            if total:
+                self.organize_total = total
+            self.current = Path(path).name if path else ""
+
+    def finish_organize(self, results: Dict[str, Any]) -> None:
+        with self._lock:
+            self.state = STATE_DONE
+            self.phase = "finished"
+            self.results = results
+            self.organize_done = self.organize_total
+            self.current = ""
+
+    def fail_organize(self, message: str, fallback_state: str) -> None:
+        with self._lock:
+            self.state = fallback_state
+            self.phase = ""
+            self.error = message
             self.current = ""
 
     def cluster(self, cluster_id: int) -> FaceCluster:
@@ -335,7 +380,7 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             # Both are load-bearing: without use_db the session would fall
             # back to the default (True) and silently write the name DB.
             "use_db": bool(config_request.use_db),
-            "names_db": base_config.get("names_db", "./facesort_names.db"),
+            "names_db": base_config.get("names_db") or DEFAULT_DB_PATH,
         }
 
     # -- the scan thread ---------------------------------------------------
@@ -408,6 +453,12 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
                 "stats": dict(session.scan_stats),
                 "results": session.results,
                 "scanning": state == STATE_SCANNING,
+                "organizing": state == STATE_ORGANIZING,
+                "organize": {
+                    "done": session.organize_done,
+                    "total": session.organize_total,
+                    "current": session.current,
+                },
             }
         elapsed = (
             time.perf_counter() - session._started_at
@@ -424,7 +475,10 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             "mode": config.get("mode", "copy"),
             "unknown_folder": config.get("unknown_folder", "_unknown"),
             "workers": _as_int(config.get("workers", 0), 0),
-            "names_db": config.get("names_db", "./facesort_names.db"),
+            # report the *resolved* location: the configured value is usually the
+            # legacy "./facesort_names.db", which maps to the per-user data dir
+            "names_db": str(resolve_db_path(
+                config.get("names_db") or DEFAULT_DB_PATH)),
             # The renderer cannot stat a path itself, and on a fresh install
             # the configured defaults usually do not exist yet — so tell it
             # whether to prefill the fields or leave them empty.
@@ -526,52 +580,132 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
         return {"ok": True, "cluster_id": cluster.cluster_id,
                 "name": name or "", "remembered": persisted}
 
+    def _scoped_photo(name: str) -> Path:
+        """Resolve ``name`` to an image *inside the folder being scanned*.
+
+        Only a basename is accepted and it is resolved within the current
+        scan's input folder, so neither endpoint can be used to read
+        arbitrary files from the machine.
+        """
+        folder = Path(session.config.get("input_folder", ".")).expanduser()
+        try:
+            candidate = (folder / Path(name).name).resolve()
+            root = folder.resolve()
+            if not candidate.is_relative_to(root):
+                raise HTTPException(status_code=403,
+                                    detail="Path is outside the input folder.")
+        except (OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        if not candidate.is_file() or not is_supported(candidate):
+            raise HTTPException(status_code=404, detail="No such image.")
+        return candidate
+
+    def _rendered(candidate: Path, edge: int, quality: int) -> bytes:
+        """Downscale ``candidate`` into a JPEG, memoised on (path, mtime, size)."""
+        stat = candidate.stat()
+        key = (str(candidate), stat.st_mtime_ns, edge)
+        cached = session.thumb_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            from PIL import Image
+
+            with Image.open(candidate) as image:
+                image = image.convert("RGB")
+                image.thumbnail((edge, edge))
+                buffer = io.BytesIO()
+                image.save(buffer, format="JPEG", quality=quality)
+                cached = buffer.getvalue()
+        except Exception as exc:  # noqa: BLE001 - a bad file is not fatal
+            logger.debug("preview failed for %s: %s", candidate, exc)
+            raise HTTPException(status_code=415,
+                                detail="Could not render a preview.")
+        session.thumb_cache[key] = cached
+        while len(session.thumb_cache) > 64:      # keep the cache small
+            session.thumb_cache.pop(next(iter(session.thumb_cache)))
+        return cached
+
+    @app.get("/thumb")
+    def get_thumb(name: str = Query(..., min_length=1)) -> Response:
+        """Small JPEG of one photo from the folder being scanned.
+
+        The desktop UI polls this with the filename from ``/status`` to show the
+        image currently being processed.
+        """
+        candidate = _scoped_photo(name)
+        return Response(content=_rendered(candidate, PREVIEW_EDGE, PREVIEW_QUALITY),
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "max-age=86400"})
+
+    @app.get("/photo")
+    def get_photo(name: str = Query(..., min_length=1)) -> Response:
+        """The *whole* photo, downscaled — what the review screen enlarges.
+
+        Same scoping as ``/thumb``; only the render size differs, so a group
+        card can show the face crop and the lightbox the full frame.
+        """
+        candidate = _scoped_photo(name)
+        return Response(content=_rendered(candidate, PHOTO_EDGE, PHOTO_QUALITY),
+                        media_type="image/jpeg",
+                        headers={"Cache-Control": "max-age=86400"})
+
     @app.post("/organize")
     def organize(request: OrganizeRequest) -> Dict[str, Any]:
-        """Sort every photo into ``output_folder/<person>/``."""
+        """Sort every photo into ``output_folder/<person>/`` on a worker thread.
+
+        Returns immediately: the UI polls ``/status`` for the per-file
+        progress and reads the final report from ``status.results``.
+        """
         with session._lock:
             if session.state in (STATE_IDLE, STATE_SCANNING):
                 raise HTTPException(
                     status_code=409,
                     detail="Nothing to organize yet — POST /scan first.")
+            if session.state == STATE_ORGANIZING:
+                raise HTTPException(status_code=409,
+                                    detail="Already organizing.")
             config = dict(session.config)
             clusters = list(session.clusters)
             names = dict(session.names)
-            state = session.state
-        session.state = STATE_ORGANIZING
+            previous_state = session.state
 
         if request.mode:
             config["mode"] = request.mode
-        try:
-            organizer = PhotoOrganizer.from_config(config)
-            summary = organizer.organize(
-                [(names.get(cluster.cluster_id), cluster)
-                 for cluster in clusters])
-        except (ValueError, OSError) as exc:
-            session.state = state
-            raise HTTPException(status_code=400,
-                                detail=f"Could not organize: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            session.state = state
-            logger.error("Organize failed: %s\n%s", exc, traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
 
-        results = {
-            "ok": summary.ok,
-            "mode": summary.mode,
-            "output_folder": str(summary.output_folder),
-            "folders": dict(summary.folders),
-            "folders_created": [str(path) for path in summary.folders_created],
-            "files_placed": summary.files_placed,
-            "copies_written": summary.copies_written,
-            "sources_removed": summary.sources_removed,
-            "unknown_placed": summary.unknown_placed,
-            "errors": [[str(path), reason] for path, reason in summary.errors],
-        }
-        session.state = STATE_DONE
-        session.results = results
-        session.phase = "finished"
-        return results
+        total = sum(len(cluster.image_paths) for cluster in clusters)
+
+        def run() -> None:
+            try:
+                organizer = PhotoOrganizer.from_config(config)
+                summary = organizer.organize(
+                    [(names.get(cluster.cluster_id), cluster)
+                     for cluster in clusters],
+                    progress_cb=session.organize_progress,
+                )
+                session.finish_organize({
+                    "ok": summary.ok,
+                    "mode": summary.mode,
+                    "output_folder": str(summary.output_folder),
+                    "folders": dict(summary.folders),
+                    "folders_created": [str(path)
+                                        for path in summary.folders_created],
+                    "files_placed": summary.files_placed,
+                    "copies_written": summary.copies_written,
+                    "sources_removed": summary.sources_removed,
+                    "unknown_placed": summary.unknown_placed,
+                    "errors": [[str(path), reason]
+                               for path, reason in summary.errors],
+                })
+            except Exception as exc:  # noqa: BLE001 - report to the UI
+                logger.error("Organize failed: %s\n%s", exc,
+                             traceback.format_exc())
+                session.fail_organize(f"{type(exc).__name__}: {exc}",
+                                      previous_state)
+
+        session.begin_organize(total)
+        threading.Thread(target=run, name="facesort-organize",
+                         daemon=True).start()
+        return {"started": True, "total": total}
 
     return app
 

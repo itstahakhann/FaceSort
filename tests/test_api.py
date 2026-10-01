@@ -129,6 +129,15 @@ def wait_for_state(client, wanted, timeout=20.0):
     return body
 
 
+def run_organize(client, mode=None, timeout=60.0):
+    """POST /organize (async) and wait for the worker thread to finish."""
+    started = client.post("/organize", json={} if not mode else {"mode": mode})
+    if started.status_code != 200:
+        return started.status_code, started.json(), {}
+    body = wait_for_state(client, {"done", "ready", "error"}, timeout)
+    return 200, body.get("results") or {}, body
+
+
 def test_handshake_helpers():
     print("port handshake helpers")
     import src.api.server as server_mod
@@ -262,8 +271,13 @@ def test_api_flow():
               "status counts named/unknown clusters")
 
         # -- organize ------------------------------------------------------
-        result = client.post("/organize", json={}).json()
-        check(result["ok"] is True, "organize succeeded")
+        code, result, org_status = run_organize(client)
+        check(code == 200, "organize accepted")
+        check(org_status.get("organizing") is False,
+              "the organizing flag is cleared when it finishes")
+        check(org_status["organize"]["total"] == 3,
+              f"organize counted 3 source photos ({org_status['organize']})")
+        check(result.get("ok") is True, "organize succeeded")
         check(result["folders"].get("Alice Smith") == 2,
               f"Alice got both photos, got {result['folders']}")
         check(result["folders"].get("_unknown") == 1,
@@ -281,7 +295,7 @@ def test_api_flow():
               "state becomes 'done' after organizing")
 
         # re-organizing must not clobber (dedup suffixes)
-        again = client.post("/organize", json={"mode": "copy"}).json()
+        _code, again, _s = run_organize(client, mode="copy")
         check(len(list((out / "Alice Smith").glob("*.jpg"))) == 4,
               "a second run writes _1 duplicates instead of overwriting")
         check(again["copies_written"] == 3, "second run placed 3 more files")
@@ -354,6 +368,118 @@ def test_name_db_round_trip():
                   f"the remembered name comes back ({labelled[0]['name']!r})")
         check(any(not c["name"] for c in second.values()),
               "the unknown person is still unnamed")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_db_path_resolution():
+    """The name DB lives in the per-user data dir, never beside the exe."""
+    print("name DB path resolution")
+    from src.names_db import (APP_DIR_NAME, DB_FILENAME, default_db_path,
+                              open_names_db, resolve_db_path, user_data_dir)
+
+    data_dir = user_data_dir()
+    check(data_dir.name == APP_DIR_NAME,
+          f"data dir is named {APP_DIR_NAME} (got {data_dir.name})")
+    check(data_dir.is_absolute(), "the data dir is an absolute path")
+    check(default_db_path().name == DB_FILENAME,
+          f"the DB file is {DB_FILENAME}")
+    check(default_db_path().parent == data_dir,
+          "the DB sits directly inside the data dir")
+
+    # the legacy spelling must NOT resolve to the working directory any more
+    for legacy in ("./facesort_names.db", "facesort_names.db"):
+        check(resolve_db_path(legacy) == default_db_path(),
+              f"{legacy!r} resolves to the per-user DB")
+    check(resolve_db_path("./data/custom.db") == Path("./data/custom.db"),
+          "an explicit relative path is honoured as given")
+    check(resolve_db_path("/tmp/facesort.db") == Path("/tmp/facesort.db"),
+          "an explicit absolute path is honoured")
+
+    with tempfile.TemporaryDirectory() as sandbox:
+        old = os.environ.get("FACEORG_DATA_DIR")
+        os.environ["FACEORG_DATA_DIR"] = sandbox
+        try:
+            check(user_data_dir() == Path(sandbox),
+                  "FACEORG_DATA_DIR overrides the location")
+            check(default_db_path() == Path(sandbox) / DB_FILENAME,
+                  "the override drives the DB path too")
+            db = open_names_db({"names_db": "./facesort_names.db"})
+            check(db is not None, "the DB opens under the override")
+            if db is not None:
+                db.close()
+            check((Path(sandbox) / DB_FILENAME).exists(),
+                  "the DB file was created inside the override directory")
+        finally:
+            if old is None:
+                os.environ.pop("FACEORG_DATA_DIR", None)
+            else:
+                os.environ["FACEORG_DATA_DIR"] = old
+
+    check(open_names_db({"names_db": ""}) is None,
+          "an empty names_db still disables the database")
+    check(open_names_db({"names_db": "none"}) is None,
+          "names_db: none still disables the database")
+
+
+def test_thumb_endpoint():
+    """GET /thumb + /photo stream previews of photos inside the scanned folder."""
+    print("live preview endpoints (/thumb, /photo)")
+    tmp = Path(tempfile.mkdtemp(prefix="faceorg_api_thumb_"))
+    try:
+        photos = tmp / "input_photos"
+        photos.mkdir()
+        make_photo(photos / "shot_a.jpg", seed=3)
+        make_photo(photos / "shot_b.jpg", seed=4)
+        (tmp / "secret.txt").write_text("not an image", encoding="utf-8")
+
+        client, _ = build_client(tmp, fake_pipeline(lambda path: []))
+        client.post("/scan", json={
+            "input_folder": str(photos), "output_folder": str(tmp / "out"),
+            "use_db": False,
+        })
+        wait_for_state(client, {"ready", "error"})
+
+        response = client.get("/thumb", params={"name": "shot_a.jpg"})
+        check(response.status_code == 200, f"thumb 200 ({response.status_code})")
+        check(response.headers["content-type"] == "image/jpeg",
+              "thumb is served as image/jpeg")
+        check(response.content[:2] == b"\xff\xd8", "thumb really is a JPEG")
+        check(len(response.content) < 200_000, "the preview is downscaled")
+
+        check(client.get("/thumb", params={"name": "missing.jpg"}).status_code
+              == 404, "a missing photo is a 404")
+        # the reported config must show where the DB really is, not the
+        # legacy "./facesort_names.db" spelling from config.yaml
+        reported = client.get("/status").json()["config"]["names_db"]
+        check(Path(reported).is_absolute(),
+              f"status reports an absolute names_db path (got {reported})")
+        check(Path(reported).name == "facesort_names.db",
+              "status points at facesort_names.db")
+        check(client.get("/thumb", params={"name": "secret.txt"}).status_code
+              == 404, "non-images are refused")
+        check(client.get("/thumb",
+                         params={"name": "../secret.txt"}).status_code == 404,
+              "path traversal is refused")
+        outside = client.get("/thumb", params={"name": str(tmp / "secret.txt")})
+        check(outside.status_code in (403, 404),
+              "absolute paths outside the folder are refused")
+
+        again = client.get("/thumb", params={"name": "shot_b.jpg"})
+        check(again.status_code == 200, "a second photo also renders")
+
+        # /photo returns the whole frame for the review lightbox
+        full = client.get("/photo", params={"name": "shot_a.jpg"})
+        check(full.status_code == 200, f"photo 200 ({full.status_code})")
+        check(full.headers["content-type"] == "image/jpeg",
+              "photo is served as image/jpeg")
+        check(full.content[:2] == b"\xff\xd8", "photo really is a JPEG")
+        check(len(full.content) >= len(response.content),
+              "the whole photo is not smaller than the scan preview")
+        check(client.get("/photo", params={"name": "../secret.txt"}).status_code
+              == 404, "/photo refuses path traversal too")
+        check(client.get("/photo", params={"name": "missing.jpg"}).status_code
+              == 404, "/photo 404s on a missing file")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -555,10 +681,24 @@ def test_real_server():
         named = http_json(f"{base}/name_cluster",
                           {"cluster_id": first["id"], "name": "Test Person"})
         check(named["ok"] is True, "POST /name_cluster accepted")
-        result = http_json(f"{base}/organize", {})
-        check(result["ok"] is True, "real organize succeeded")
+
+        # /organize is asynchronous: it returns {"started": true, ...}
+        started = http_json(f"{base}/organize", {})
+        check(started.get("started") is True, "POST /organize starts")
+        check(started.get("total", 0) >= 1,
+              f"organize counted the photos ({started})")
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            status = http_json(f"{base}/status")
+            if status["state"] in ("done", "error"):
+                break
+            time.sleep(0.5)
+        check(status["state"] == "done",
+              f"organize finished (got {status['state']}: {status['error']})")
+        result = status["results"] or {}
+        check(result.get("ok") is True, "real organize succeeded")
         check(result["folders"].get("Test Person", 0) >= 1,
-              f"the named folder received photos ({result['folders']})")
+              f"the named folder received photos ({result.get('folders')})")
         placed = sum(result["folders"].values())
         on_disk = sum(1 for _ in (tmp / "out").rglob("*.jpg"))
         check(on_disk == placed,
@@ -578,6 +718,8 @@ def main():
     test_handshake_helpers()
     test_models_and_default_config()
     test_scanning_state()
+    test_db_path_resolution()
+    test_thumb_endpoint()
     test_api_flow()
     test_name_db_round_trip()
     if "--real" in sys.argv:
