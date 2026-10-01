@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src http://127.0.0.1:*; font-src 'self'; form-action 'none'; base-uri 'none';" />
+  <title>FaceSort</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- ------------------------------------------------------- sidebar -->
+    <aside class="sidebar">
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="22" height="22">
+            <circle cx="12" cy="9" r="3.4" fill="currentColor" />
+            <path d="M4.6 20c.9-3.7 3.9-5.6 7.4-5.6s6.5 1.9 7.4 5.6z" fill="currentColor" />
+          </svg>
+        </div>
+        <div>
+          <h1>FaceSort</h1>
+          <p class="brand-sub">Runs entirely on this computer</p>
+        </div>
+      </header>
+
+      <section class="panel">
+        <h2 class="panel-title">Folders</h2>
+
+        <label class="field">
+          <span class="field-label">Input folder</span>
+          <span class="field-row">
+            <input id="input-folder" type="text" spellcheck="false"
+                   placeholder="C:\Pictures\family" />
+            <button id="pick-input" class="ghost" type="button" title="Browse…">…</button>
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Output folder</span>
+          <span class="field-row">
+            <input id="output-folder" type="text" spellcheck="false"
+                   placeholder="C:\Pictures\sorted" />
+            <button id="pick-output" class="ghost" type="button" title="Browse…">…</button>
+          </span>
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2 class="panel-title">Grouping</h2>
+
+        <label class="field">
+          <span class="field-label">
+            Tolerance <output id="tolerance-value">0.50</output>
+          </span>
+          <input id="tolerance" type="range" min="0.20" max="1.00" step="0.05" value="0.50" />
+          <span class="hint">Higher values group more faces together.</span>
+        </label>
+
+        <div class="field-grid">
+          <label class="field">
+            <span class="field-label">Min faces / group</span>
+            <input id="min-faces" type="number" min="1" max="50" step="1" value="2" />
+          </label>
+          <label class="field">
+            <span class="field-label">Worker processes</span>
+            <input id="workers" type="number" min="0" max="16" step="1" value="0" />
+            <span class="hint">0 = auto</span>
+          </label>
+        </div>
+
+        <div class="field">
+          <span class="field-label">When sorting</span>
+          <div class="segmented" role="radiogroup" aria-label="Mode">
+            <button type="button" class="seg is-active" data-mode="copy" role="radio" aria-checked="true">Copy</button>
+            <button type="button" class="seg" data-mode="move" role="radio" aria-checked="false">Move</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="scan" class="primary" type="button">Scan photos</button>
+        <button id="organize" class="accent" type="button" disabled>Sort into folders</button>
+      </div>
+
+      <section class="panel progress-panel" id="progress-panel" hidden>
+        <div class="progress-head">
+          <span id="progress-label">Starting…</span>
+          <span id="progress-count" class="mono">0 / 0</span>
+        </div>
+        <div class="progress"><div id="progress-bar" class="progress-bar"></div></div>
+      </section>
+
+      <section class="panel" id="summary-panel" hidden>
+        <h2 class="panel-title">Last run</h2>
+        <dl class="summary" id="summary"></dl>
+      </section>
+
+      <section class="panel" id="log-panel" hidden>
+        <h2 class="panel-title">
+          Engine log
+          <button id="log-toggle" class="ghost small" type="button">hide</button>
+        </h2>
+        <pre id="log" class="log" hidden></pre>
+      </section>
+
+      <p class="privacy">
+        No photo, face or name ever leaves this machine.
+      </p>
+    </aside>
+
+    <!-- ---------------------------------------------------------- main -->
+    <main class="content">
+      <header class="content-head">
+        <div>
+          <h2 id="content-title">Review the groups</h2>
+          <p id="content-sub" class="muted">Scan a folder to see who is in the photos.</p>
+        </div>
+        <div class="chips" id="chips"></div>
+      </header>
+
+      <section id="empty-state" class="empty">
+        <div class="empty-art" aria-hidden="true">
+          <svg viewBox="0 0 120 80" width="140" height="92">
+            <rect x="6" y="10" width="46" height="60" rx="6" fill="currentColor" opacity=".25"/>
+            <rect x="66" y="10" width="46" height="60" rx="6" fill="currentColor" opacity=".45"/>
+            <circle cx="29" cy="34" r="8" fill="currentColor" opacity=".6"/>
+            <path d="M15 62c1.6-8 7-12 14-12s12.4 4 14 12z" fill="currentColor" opacity=".6"/>
+            <circle cx="89" cy="34" r="8" fill="currentColor" opacity=".9"/>
+            <path d="M75 62c1.6-8 7-12 14-12s12.4 4 14 12z" fill="currentColor" opacity=".9"/>
+          </svg>
+        </div>
+        <h3>Nothing scanned yet</h3>
+        <p>Pick an input folder, then press <strong>Scan photos</strong>.
+           Faces are detected and grouped locally, then you name each group.</p>
+      </section>
+
+      <section id="clusters" class="clusters" aria-live="polite"></section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+# ---------------------------------------------------------------------
+# FaceSort - ignore rules
+#
+# NOTE: gitignore has no inline comments - a "#" after a pattern becomes
+# part of the pattern. Keep explanatory notes on their own lines.
+# ---------------------------------------------------------------------
+
+# ---- Python ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- Build output (regenerate with build.bat / build.sh) ----
+# staged ONNX weights + PyInstaller work + dist
+/python_build/
+# legacy PyInstaller output dir
+/build/
+/dist/
+# electron-builder installers + win-unpacked
+/electron/release/
+*.spec.bak
+
+# ---- Node / Electron ----
+node_modules/
+.npm/
+
+# electron/build/icon.ico is deliberately NOT ignored: it is the app icon,
+# committed on purpose (regenerate with `python tools/make_icon.py`).
+
+# ---- Runtime data (never commit user data) ----
+*.db
+*.db-journal
+facesort_names.db
+grouped_photos/
+input_photos/
+
+# ---- Logs / scratch ----
+*.log
+*.tmp
+
+# ---- Editors / OS ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,69 @@
+{
+  "name": "facesort-desktop",
+  "productName": "FaceSort",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline face grouping & photo auto-organizer. Electron shell around a local Python engine.",
+  "author": "FaceSort contributors",
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder",
+    "dist": "electron-builder --win nsis --x64",
+    "dist:dir": "electron-builder --dir --win --x64",
+    "dist:portable": "electron-builder --win portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "org.facesort.app",
+    "productName": "FaceSort",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../python_build/dist/backend",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "FaceSort-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FaceSort"
+    },
+    "portable": {
+      "artifactName": "FaceSort-Portable-${version}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "facesort",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Face Grouping & Auto-Organizer. The desktop app is an Electron shell (electron/) around a Python engine built with PyInstaller. This root manifest only forwards the common commands so `npm start` works from the project root as well as from electron/.",
+  "license": "MIT",
+  "scripts": {
+    "start": "npm --prefix electron start",
+    "dev": "npm --prefix electron start",
+    "postinstall": "npm --prefix electron install",
+    "build": "npm --prefix electron run build",
+    "dist": "npm --prefix electron run dist",
+    "dist:portable": "npm --prefix electron run dist:portable"
+  }
+}

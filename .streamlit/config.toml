@@ -1,0 +1,8 @@
+# Face Grouping & Auto-Organizer — Streamlit settings
+#
+# SPEC §6 "Privacy": all processing is local. Streamlit's optional usage
+# telemetry is therefore switched off — the app must never send anything
+# outbound, not even anonymised click stats.
+
+[browser]
+gatherUsageStats = false

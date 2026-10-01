@@ -1,0 +1,17 @@
+insightface
+onnxruntime
+opencv-python
+Pillow
+numpy
+scikit-learn
+# Local API backend for the Electron desktop app (src/api/server.py).
+# uvicorn was already present via streamlit; fastapi/httpx are the new bits.
+fastapi
+uvicorn
+httpx
+# Legacy web UI (src/ui/app.py) — optional now that Electron is the
+# shipped desktop app; the CLI (python -m src.main) needs none of it.
+streamlit
+pyinstaller
+# Not in SPEC.md §14, but required to read config.yaml
+PyYAML

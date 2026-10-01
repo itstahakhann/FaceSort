@@ -1,0 +1,12 @@
+# Face Grouping & Auto-Organizer — default configuration
+# Every key can be overridden by a CLI flag (see README.md).
+
+input_folder: ./input_photos        # Source of images
+output_folder: ./grouped_photos     # Destination
+tolerance: 0.5                      # Clustering strictness (distance threshold)
+min_faces_per_cluster: 2            # Ignore tiny clusters
+mode: copy                          # copy or move
+detector_backend: retinaface        # retinaface / dlib_hog / dlib_cnn
+unknown_folder: _unknown            # Folder for skipped clusters
+names_db: ./facesort_names.db # Remembered people (empty disables M3)
+workers: 0                          # Detection workers (0 = auto, 1 = single-process)

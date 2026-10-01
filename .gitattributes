@@ -1,0 +1,15 @@
+# Normalise line endings: keep LF in the repository, so build.sh works on
+# Linux/macOS, and let Windows check out .bat/.ps1 with CRLF.
+* text=auto eol=lf
+
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary assets
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.onnx  binary
+*.exe   binary
+*.db    binary
