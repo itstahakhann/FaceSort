@@ -5,6 +5,19 @@ Uses the ArcFace recognition head of the same buffalo_l model on the CPU
 returned vector is L2-normalised, so cosine distance and Euclidean distance
 on it are interchangeable for the clustering step (SPEC §7).
 
+Two fingerprints per face
+-------------------------
+Alongside the whole-face vector each face also gets a **periocular**
+("eye region") vector — see :mod:`src.eye_embedder`.  Whole-face embeddings
+drift as a child grows into an adult, so the clusterer blends the two
+(:mod:`src.clusterer`); the eye vector is what keeps a childhood photo and
+an adult photo of the same person in one group.
+
+Cost: one extra forward pass of the recognition net on a 112x112 input per
+face.  Detection over the full frame dominates, so this adds a modest
+fraction to the per-image time rather than doubling it, and both passes
+reuse the one shared model instance.
+
 No network call is ever made here: the weights come from the local cache.
 """
 
@@ -17,13 +30,19 @@ from typing import Any, List, Optional, Sequence
 import numpy as np
 
 from .detector import DetectedFace
+from .eye_embedder import EyeEmbeddingError, embed_periocular
 from .face_model import MODEL_NAME, make_face
 
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 512  # buffalo_l (w600k_r50) produces 512-D vectors
 
-__all__ = ["FaceEmbedding", "FaceEmbedder", "FaceEmbeddingError", "EMBEDDING_DIM"]
+__all__ = [
+    "FaceEmbedding",
+    "FaceEmbedder",
+    "FaceEmbeddingError",
+    "EMBEDDING_DIM",
+]
 
 
 class FaceEmbeddingError(RuntimeError):
@@ -32,17 +51,25 @@ class FaceEmbeddingError(RuntimeError):
 
 @dataclass(frozen=True)
 class FaceEmbedding:
-    """A detected face together with its fingerprint."""
+    """A detected face together with its two fingerprints.
+
+    ``embedding`` is the whole-face vector and ``eye_embedding`` the
+    periocular one.  The latter is ``None`` when the region was too small or
+    too low-resolution to fingerprint — every consumer must treat that as
+    "no eye signal for this face", never as an error.
+    """
 
     detection: DetectedFace
     embedding: np.ndarray  # float32, L2-normalised, shape (EMBEDDING_DIM,)
+    eye_embedding: Optional[np.ndarray] = None  # same shape, or None
 
 
 class FaceEmbedder:
-    """Extracts embeddings from detected faces using the ArcFace model."""
+    """Extracts whole-face and periocular embeddings using the ArcFace model."""
 
-    def __init__(self, analysis: Any = None) -> None:
+    def __init__(self, analysis: Any = None, include_eye_regions: bool = True) -> None:
         self._analysis = analysis
+        self.include_eye_regions = bool(include_eye_regions)
 
     @property
     def analysis(self) -> Any:
@@ -102,24 +129,55 @@ class FaceEmbedder:
             )
         return embedding / norm
 
+    def eye_embed_one(
+        self, image: np.ndarray, detection: DetectedFace
+    ) -> np.ndarray:
+        """Return the periocular fingerprint of one face (see eye_embedder)."""
+        return embed_periocular(image, detection, self.recognition_model)
+
     def embed(
         self, image: Optional[np.ndarray], detections: Sequence[DetectedFace]
     ) -> List[FaceEmbedding]:
         """Embed every face of one image.
 
         Faces that cannot be embedded are logged and skipped, so an image
-        with no faces simply yields an empty list.
+        with no faces simply yields an empty list.  A face whose *eye region*
+        fails is still returned — with ``eye_embedding=None`` — because the
+        whole-face vector alone is still worth clustering.
         """
         if image is None:
             logger.warning("embed() called without an image; returning no embeddings.")
             return []
 
         results: List[FaceEmbedding] = []
+        missing_eyes = 0
         for detection in detections:
             try:
                 embedding = self.embed_one(image, detection)
             except FaceEmbeddingError as exc:
                 logger.warning("Skipping face: %s", exc)
                 continue
-            results.append(FaceEmbedding(detection=detection, embedding=embedding))
+
+            eye_embedding = None
+            if self.include_eye_regions:
+                try:
+                    eye_embedding = self.eye_embed_one(image, detection)
+                except EyeEmbeddingError as exc:
+                    # Expected for small or blurred faces; not worth a warning
+                    # per photo, but it is worth counting for the log summary.
+                    logger.debug("No periocular embedding: %s", exc)
+                    missing_eyes += 1
+            results.append(
+                FaceEmbedding(
+                    detection=detection,
+                    embedding=embedding,
+                    eye_embedding=eye_embedding,
+                )
+            )
+        if missing_eyes:
+            logger.info(
+                "%d of %d face(s) had no usable eye region (too small or "
+                "blurred); they still cluster on the whole-face vector.",
+                missing_eyes, len(results),
+            )
         return results

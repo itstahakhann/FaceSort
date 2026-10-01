@@ -621,13 +621,17 @@ def auto_label_clusters(
     for cluster in clusters:
         match = None
         if db is not None and cluster.centroid is not None:
-            match = db.find_match(cluster.centroid, tolerance)
+            match = db.find_match(
+                cluster.centroid, tolerance,
+                eye_embedding_centroid=cluster.eye_centroid,
+            )
         if match is None:
             pending.append(cluster)
             continue
         auto_labels[cluster.cluster_id] = match.person_name
-        logger.debug("Cluster #%s auto-labeled as %r (distance %.3f).",
-                     cluster.cluster_id, match.person_name, match.distance)
+        logger.debug("Cluster #%s auto-labeled as %r (distance %.3f, %s).",
+                     cluster.cluster_id, match.person_name, match.distance,
+                     "eye region + face" if match.used_eye else "face only")
 
     if auto_labels:
         print(f"\n{len(auto_labels)} cluster(s) matched the name database "
@@ -635,10 +639,129 @@ def auto_label_clusters(
     return auto_labels, pending
 
 
+def label_and_fuse(
+    clusters: Sequence[FaceCluster],
+    db: Optional[NamesDB],
+    tolerance: float,
+) -> Tuple[Dict[int, str], List[FaceCluster]]:
+    """Auto-label clusters against the database, then fuse remembered merges.
+
+    This is the two-stage pass the desktop app and the CLI both want:
+    :func:`auto_label_clusters` decides *who* each group is, and the fuse step
+    then collapses groups that the database already knows are one person — so
+    a merge the user confirmed in one run survives every later run even when
+    the fused distance did not group them on its own.
+    """
+    labels, pending = auto_label_clusters(clusters, db, tolerance)
+    # The fused list is the list of record objects; renumbering in place
+    # afterwards is what keeps FaceRecord.cluster_id consistent for the
+    # caller.  ``merge_clusters_by_memory`` returns new FaceCluster objects
+    # only when a fuse actually happened.
+    fused = merge_clusters_by_memory(clusters, labels)
+    if len(fused) == len(clusters):
+        return labels, pending
+    fused = renumber_clusters(fused)
+
+    print(f"Merged {len(clusters) - len(fused)} group(s) the name database "
+          f"already knows are the same person.")
+    # Re-derive the labels for the new ids: a fused group takes the name of
+    # the (auto-labelled) cluster it was built from.
+    by_face: Dict[int, str] = {}
+    for cluster in clusters:
+        name = labels.get(cluster.cluster_id)
+        for face in cluster.faces:
+            by_face[id(face)] = name
+    relabelled: Dict[int, str] = {}
+    for cluster in fused:
+        for face in cluster.faces:
+            name = by_face.get(id(face))
+            if name:
+                relabelled[cluster.cluster_id] = name
+                break
+    pending = [c for c in fused if not relabelled.get(c.cluster_id)]
+    return relabelled, pending
+
+
+def merge_clusters_by_memory(
+    clusters: Sequence[FaceCluster],
+    auto_labels: Mapping[int, str],
+) -> List[FaceCluster]:
+    """Fuse clusters the name database says are the same person.
+
+    Remembering a merge is not enough on its own: a re-scan re-clusters from
+    scratch, so a childhood group and an adult group of one person come back
+    as two clusters again.  When both already carry the *same* auto-label
+    they are the same person by definition, so they are fused here.
+
+    This is what makes the manual merge stick across runs: the clusterer's
+    fused distance usually gets it right, and this catches the cases it does
+    not (very blurred childhood photos, a very wide age gap).
+
+    Clusters keep the first member's order and id, so names and thumbnails
+    stay stable.  Returns a new list; the input is not modified.
+    """
+    by_name: Dict[str, List[FaceCluster]] = {}
+    for cluster in clusters:
+        name = auto_labels.get(cluster.cluster_id)
+        if name:
+            by_name.setdefault(name, []).append(cluster)
+
+    merged: List[FaceCluster] = []
+    consumed: set = set()
+    leader_of: Dict[int, FaceCluster] = {}   # source cluster id -> fused group
+    for name, group in by_name.items():
+        if len(group) < 2:
+            continue
+        fused = FaceCluster(cluster_id=group[0].cluster_id)
+        for cluster in group:
+            fused.faces.extend(cluster.faces)
+            consumed.add(id(cluster))
+            leader_of[cluster.cluster_id] = fused
+        for face in fused.faces:
+            face.cluster_id = fused.cluster_id
+        logger.info(
+            "Fused %d group(s) remembered as %r into one (%d faces).",
+            len(group), name, fused.size,
+        )
+        merged.append(fused)
+
+    # Preserve the original ordering: a fused group appears where its first
+    # member was, and is emitted only once.
+    ordered: List[FaceCluster] = []
+    emitted: set = set()
+    for cluster in clusters:
+        fused = leader_of.get(cluster.cluster_id)
+        if fused is not None:
+            if fused.cluster_id not in emitted:
+                emitted.add(fused.cluster_id)
+                ordered.append(fused)
+        else:
+            ordered.append(cluster)
+    for fused in merged:
+        if fused.cluster_id not in emitted:
+            emitted.add(fused.cluster_id)
+            ordered.append(fused)
+    return ordered
+
+
+def renumber_clusters(clusters: Sequence[FaceCluster]) -> List[FaceCluster]:
+    """Reassign contiguous ids 0..n-1, in order, and return the list."""
+    result = list(clusters)
+    for index, cluster in enumerate(result):
+        cluster.cluster_id = index
+        for face in cluster.faces:
+            face.cluster_id = index
+    return result
+
+
 def save_named_cluster(db: Optional[NamesDB], cluster: FaceCluster,
                        name: str) -> bool:
     """Persist one freshly named cluster (M3). Never raises: a failing DB
-    must not lose the naming the user just did."""
+    must not lose the naming the user just did.
+
+    The periocular centroid is stored alongside the whole-face one when the
+    cluster has it, so later runs can match this person across the age gap.
+    """
     if db is None or cluster.centroid is None:
         return False
     try:
@@ -647,6 +770,8 @@ def save_named_cluster(db: Optional[NamesDB], cluster: FaceCluster,
             cluster.centroid,
             cluster.image_paths,
             faces_seen=cluster.size,
+            eye_embedding_centroid=cluster.eye_centroid,
+            eye_faces_seen=cluster.size if cluster.eye_centroid is not None else 0,
         )
         return True
     except Exception as exc:  # noqa: BLE001 - report, don't abort
@@ -827,9 +952,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                            config.get("tolerance"))
             tolerance = 0.5
 
-        # M3: known people are labelled automatically, so the prompt only
-        # ever asks about clusters the DB could not recognise.
-        auto_labels, _pending = auto_label_clusters(clusters, db, tolerance)
+        # M3: known people are labelled automatically, so the prompt only ever asks
+        # about clusters the DB could not recognise.  Groups the database
+        # already knows are one person are fused here, which is how a merge
+        # confirmed in an earlier run (or in the desktop app) survives.
+        auto_labels, _pending = label_and_fuse(clusters, db, tolerance)
 
         remembered = 0
 

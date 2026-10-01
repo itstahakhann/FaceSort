@@ -10,3 +10,13 @@ detector_backend: retinaface        # retinaface / dlib_hog / dlib_cnn
 unknown_folder: _unknown            # Folder for skipped clusters
 names_db: ./facesort_names.db # Remembered people (empty disables M3)
 workers: 0                          # Detection workers (0 = auto, 1 = single-process)
+
+# --- Age invariance ----------------------------------------------------
+# A childhood photo and an adult photo of the same person drift apart in a
+# whole-face embedding (jaw, cheeks and nose all change), which splits them
+# into two groups. The periocular region — brows, eyes, nose bridge — barely
+# changes with age, so clustering blends both signals, weighted toward the
+# eye region. Set use_eye_regions: false to fall back to whole-face only.
+use_eye_regions: true       # Extract a second "eye region" fingerprint per face
+weight_full_face: 0.4       # Whole-face share of the fused distance
+weight_eye_region: 0.6      # Eye-region share (the two should sum to 1)

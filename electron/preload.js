@@ -97,6 +97,17 @@ contextBridge.exposeInMainWorld('faceorg', {
     clusters: () => call('/clusters', { timeout: 120000 }),
     nameCluster: (clusterId, name) =>
       call('/name_cluster', { method: 'POST', body: { cluster_id: clusterId, name } }),
+    /**
+     * Link two groups as the same person (typically a childhood group and an
+     * adult one). Supplying a name also remembers the link, so later scans
+     * group them automatically.
+     */
+    mergeClusters: (clusterA, clusterB, name) =>
+      call('/merge_clusters', {
+        method: 'POST',
+        body: { cluster_a: clusterA, cluster_b: clusterB, name: name || '' },
+        timeout: 60000,
+      }),
     organize: (mode) =>
       call('/organize', { method: 'POST', body: mode ? { mode } : {}, timeout: 300000 }),
   },

@@ -372,6 +372,102 @@ def test_name_db_round_trip():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_merge_clusters():
+    """POST /merge_clusters links two groups as one person at different ages."""
+    print("manual merge (same person, different age)")
+    tmp = Path(tempfile.mkdtemp(prefix="faceorg_api_merge_"))
+    try:
+        photos = tmp / "input_photos"
+        photos.mkdir()
+        # two groups of one person: "kid" (3 photos) and "adult" (2 photos)
+        plan = {
+            "kid_1.jpg": "kid", "kid_2.jpg": "kid", "kid_3.jpg": "kid",
+            "adult_1.jpg": "adult", "adult_2.jpg": "adult",
+        }
+        for index, name in enumerate(plan):
+            make_photo(photos / name, seed=40 + index)
+
+        def records_for(path):
+            from src.clusterer import FaceRecord
+
+            return [FaceRecord(
+                image_path=path, bbox=(30, 30, 80, 80),
+                embedding=embedding_for(plan[path.name]), score=0.9,
+            )]
+
+        db_path = tmp / "names.db"
+        config = write_config(tmp / "config.yaml", db_path)
+        client, _ = build_client(tmp, fake_pipeline(records_for), config_path=config)
+
+        check(client.post("/merge_clusters",
+                          json={"cluster_a": 0, "cluster_b": 0}).status_code == 409,
+              "merging before a scan is a 409")
+
+        client.post("/scan", json={
+            "input_folder": str(photos), "output_folder": str(tmp / "out"),
+            "min_faces_per_cluster": 1, "use_db": True,
+        })
+        wait_for_state(client, {"ready", "error"})
+        before = {c["id"]: c for c in client.get("/clusters").json()["clusters"]}
+        check(len(before) == 2, f"two groups to start with ({len(before)})")
+        sizes = sorted(c["size"] for c in before.values())
+        check(sizes == [2, 3], f"group sizes are 3 and 2 ({sizes})")
+
+        kid = max(before.values(), key=lambda c: c["size"])["id"]
+        adult = min(before.values(), key=lambda c: c["size"])["id"]
+
+        check(client.post("/merge_clusters",
+                          json={"cluster_a": kid, "cluster_b": kid}).status_code
+              == 400, "merging a group with itself is a 400")
+        check(client.post("/merge_clusters",
+                          json={"cluster_a": kid, "cluster_b": 99}).status_code
+              == 404, "an unknown group id is a 404")
+
+        merged = client.post("/merge_clusters", json={
+            "cluster_a": adult, "cluster_b": kid, "name": "Sam",
+        })
+        check(merged.status_code == 200, f"merge accepted ({merged.status_code})")
+        result = merged.json()
+        check(result["ok"] is True, "merge reports success")
+        check(result["size"] == 5,
+              f"the merged group has all 5 faces ({result.get('size')})")
+        check(result["remembered"] is True,
+              "a named merge is written to the name database")
+
+        after = {c["id"]: c for c in client.get("/clusters").json()["clusters"]}
+        check(len(after) == 1, f"one group remains ({len(after)})")
+        if after:
+            only = list(after.values())[0]
+            check(only["size"] == 5, f"it holds every face ({only['size']})")
+            check(only["photos"] == 5, f"and every photo ({only['photos']})")
+            check(only["name"] == "Sam", f"it carries the name ({only['name']!r})")
+
+        # ids must be renumbered without gaps, since the UI keys off them
+        check(sorted(after) == list(range(len(after))),
+              f"cluster ids are contiguous ({sorted(after)})")
+
+        # the merged person is now remembered: the organizer sees one group
+        _code, report, _s = run_organize(client)
+        check(report.get("folders", {}).get("Sam") == 5,
+              f"all 5 photos land in Sam's folder ({report.get('folders')})")
+
+        # a re-scan should auto-label the combined group from the database
+        client.post("/scan", json={
+            "input_folder": str(photos), "output_folder": str(tmp / "out"),
+            "min_faces_per_cluster": 1, "use_db": True,
+        })
+        wait_for_state(client, {"ready", "error"})
+        rescanned = client.get("/clusters").json()["clusters"]
+        check(len(rescanned) == 1, f"still one group after a re-scan ({len(rescanned)})")
+        if rescanned:
+            check(rescanned[0]["auto"] is True,
+                  "the remembered name auto-labels the merged group")
+            check(rescanned[0]["name"] == "Sam",
+                  f"with the right name ({rescanned[0]['name']!r})")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_db_path_resolution():
     """The name DB lives in the per-user data dir, never beside the exe."""
     print("name DB path resolution")
@@ -722,6 +818,7 @@ def main():
     test_thumb_endpoint()
     test_api_flow()
     test_name_db_round_trip()
+    test_merge_clusters()
     if "--real" in sys.argv:
         test_real_server()
 

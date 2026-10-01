@@ -63,6 +63,13 @@ const ui = {
   clusters: $('clusters'),
   clusterSearch: $('cluster-search'),
   autoCelebrate: $('auto-celebrate'),
+  linkToggle: $('link-toggle'),
+  mergeTray: $('merge-tray'),
+  mergeSlotA: $('merge-slot-a'),
+  mergeSlotB: $('merge-slot-b'),
+  mergeName: $('merge-name'),
+  mergeConfirm: $('merge-confirm'),
+  mergeCancel: $('merge-cancel'),
   doneStats: $('done-stats'),
   folderList: $('folder-list'),
   doneOpen: $('done-open'),
@@ -98,6 +105,9 @@ const state = {
   busy: false,
   outputFolder: '',
   celebrate: true,
+  /** Manual age bridge ("same person?"). */
+  linking: false,
+  linkPicks: [],           // cluster ids chosen, in order; max 2
 };
 
 /* ====================================================== tiny helpers */
@@ -334,7 +344,9 @@ async function startScan() {
   state.outputFolder = settings.output_folder;
   state.clusters = [];
   state.names.clear();
+  state.linkPicks = [];
   ui.clusters.replaceChildren();
+  setLinkMode(false);
   setView('scanning');
   setBusy(true);
   ui.previewImg.removeAttribute('src');
@@ -487,7 +499,8 @@ function renderClusters() {
     empty.textContent = query ? 'No group matches that filter.' : 'No groups yet.';
     ui.clusters.append(empty);
   }
-  ui.organize.disabled = state.clusters.length === 0;
+  ui.organize.disabled = state.clusters.length === 0 || state.linking;
+  applyLinkState();
 }
 
 function buildCard(cluster) {
@@ -504,6 +517,11 @@ function buildCard(cluster) {
   front.className = 'flip-face front';
   const top = document.createElement('div');
   top.className = 'card-top';
+  // In link mode the whole card is the target, so the title area carries a
+  // "First"/"Second" flag telling the user which slot they just filled.
+  const pickFlag = document.createElement('span');
+  pickFlag.className = 'pick-flag';
+  pickFlag.hidden = true;
   const idBox = document.createElement('div');
   const idText = document.createElement('div');
   idText.className = 'card-id';
@@ -518,7 +536,32 @@ function buildCard(cluster) {
   const badge = document.createElement('span');
   badge.className = `badge ${name ? (cluster.auto ? 'auto' : 'named') : 'unnamed'}`;
   badge.textContent = name ? (cluster.auto ? 'remembered' : 'named') : '';
-  top.append(idBox, badge);
+  top.append(idBox, badge, pickFlag);
+
+  // Age-invariance note: when the eye region could not be used for most of
+  // this group the photos were probably small or blurred, which is exactly
+  // when a manual link is the right tool.
+  const coverage = typeof cluster.eye_coverage === 'number'
+    ? cluster.eye_coverage : null;
+  if (coverage !== null && coverage < 0.999) {
+    const note = document.createElement('p');
+    note.className = 'card-note';
+    note.textContent = coverage > 0
+      ? `${Math.round(coverage * 100)}% eye-region detail`
+      : 'no eye-region detail (small photos)';
+    idBox.append(note);
+  }
+
+  // In link mode the whole card selects, so clicks must not also open the
+  // lightbox or the naming dialog.
+  wrap.addEventListener('click', (event) => {
+    if (!state.linking) return;
+    // Let the card's own buttons keep working.
+    if (event.target.closest('button')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    pickForLink(cluster.id);
+  });
 
   const grid = document.createElement('div');
   grid.className = 'thumb-grid';
@@ -553,7 +596,10 @@ function buildCard(cluster) {
   nameBtn.type = 'button';
   nameBtn.className = 'btn primary';
   nameBtn.append(icon('tag'), document.createTextNode(name ? 'Rename' : 'Name'));
-  nameBtn.addEventListener('click', () => openModal(cluster));
+  nameBtn.addEventListener('click', () => {
+    if (state.linking) { pickForLink(cluster.id); return; }
+    openModal(cluster);
+  });
   const flipBtn = document.createElement('button');
   flipBtn.type = 'button';
   flipBtn.className = 'btn ghost';
@@ -602,10 +648,126 @@ function buildCard(cluster) {
   flipBack.className = 'btn ghost';
   flipBack.append(icon('refresh'), document.createTextNode('Back'));
   flipBack.addEventListener('click', () => wrap.classList.remove('is-flipped'));
-  back.append(backTitle, details, photos, flipBack);
+  const backActions = document.createElement('div');
+  backActions.className = 'card-actions';
+  backActions.append(flipBack);
+  back.append(backTitle, details, photos, backActions);
 
   inner.append(front, back);
   return wrap;
+}
+
+/* ================================================== manual age bridge */
+/* The safety net: the model cannot always bridge a large age gap, so the
+ * user states the ground truth. Two groups become one for this run, and a
+ * supplied name is remembered so later scans group them by themselves. */
+
+function clusterById(id) {
+  return state.clusters.find((cluster) => cluster.id === id) || null;
+}
+
+function clusterLabel(cluster) {
+  if (!cluster) return '';
+  const name = state.names.get(cluster.id);
+  const fallback = `Group ${cluster.id + 1}`;
+  if (!name) return fallback;
+  // Show the group number too, so two differently-named picks stay
+  // distinguishable while linking.
+  return `${name} · ${fallback}`;
+}
+
+function setLinkMode(on) {
+  state.linking = Boolean(on);
+  ui.linkToggle.setAttribute('aria-pressed', state.linking ? 'true' : 'false');
+  ui.linkToggle.classList.toggle('primary', state.linking);
+  ui.linkToggle.classList.toggle('quiet', !state.linking);
+  ui.mergeTray.hidden = !state.linking;
+  ui.clusters.classList.toggle('is-linking', state.linking);
+  ui.clusterSearch.disabled = state.linking;
+  if (!state.linking) state.linkPicks = [];
+  applyLinkState();
+  if (state.linking) {
+    ui.linkToggle.blur();
+    announce('Link mode on. Select two groups that are the same person.');
+  }
+}
+
+/** Reflect the current picks in the tray and on the cards. */
+function applyLinkState() {
+  const slots = [ui.mergeSlotA, ui.mergeSlotB];
+  slots.forEach((slot, index) => {
+    const id = state.linkPicks[index];
+    const cluster = id === undefined ? null : clusterById(id);
+    slot.classList.toggle('is-filled', Boolean(cluster));
+    const text = slot.querySelector('.merge-slot-empty');
+    if (text) {
+      text.textContent = cluster
+        ? `${clusterLabel(cluster)} · ${cluster.photos} photo(s)`
+        : 'Select a group';
+    }
+  });
+
+  for (const card of ui.clusters.querySelectorAll('.flip')) {
+    const id = Number(card.dataset.cluster);
+    const picked = state.linkPicks.indexOf(id);
+    card.classList.toggle('is-picked', picked > -1);
+    // Dim the unpicked ones only once a pick is in progress, so the grid
+    // stays fully legible before the user has chosen anything.
+    card.classList.toggle('is-dimmed',
+      state.linking && state.linkPicks.length === 1 && picked === -1);
+    const flag = card.querySelector('.pick-flag');
+    if (flag) {
+      const active = picked > -1;
+      flag.hidden = !active;
+      flag.replaceChildren(icon('link'),
+        document.createTextNode(picked === 0 ? 'First' : 'Second'));
+    }
+  }
+
+  ui.mergeConfirm.disabled = state.linkPicks.length !== 2;
+  ui.organize.disabled = state.clusters.length === 0 || state.linking;
+}
+
+function pickForLink(clusterId) {
+  if (!state.linking) return;
+  const at = state.linkPicks.indexOf(clusterId);
+  if (at > -1) {
+    state.linkPicks.splice(at, 1);
+  } else if (state.linkPicks.length >= 2) {
+    // Two are chosen already: the newest pick replaces the older slot, which
+    // is what someone changing their mind expects.
+    state.linkPicks = [state.linkPicks[1], clusterId];
+  } else {
+    state.linkPicks.push(clusterId);
+  }
+  applyLinkState();
+  const count = state.linkPicks.length;
+  announce(count === 1
+    ? 'First group selected. Now select the second.'
+    : (count === 2 ? 'Two groups selected. Link them.' : 'Selection cleared.'));
+}
+
+async function confirmMerge() {
+  if (state.linkPicks.length !== 2) return;
+  const [first, second] = state.linkPicks;
+  const name = ui.mergeName.value.trim();
+  ui.mergeConfirm.disabled = true;
+  try {
+    const result = await bridge.api.mergeClusters(first, second, name);
+    // Ids were renumbered server-side, so reload rather than patch locally.
+    await loadClusters();
+    setLinkMode(false);
+    ui.mergeName.value = '';
+    const remembered = result.remembered
+      ? ' — remembered for next time'
+      : ' (this run only)';
+    toast(`Linked into one group of ${result.size} photo(s)${remembered}`,
+      'ok', 'link');
+    if (state.celebrate) burst(40);
+  } catch (error) {
+    toast(String(error.message || error), 'error');
+    ui.mergeConfirm.disabled = false;
+  }
 }
 
 /* ============================================================= modal */
@@ -966,6 +1128,12 @@ function wire() {
   ui.scan.addEventListener('click', startScan);
   ui.organize.addEventListener('click', runOrganize);
   ui.clusterSearch.addEventListener('input', renderClusters);
+  ui.linkToggle.addEventListener('click', () => setLinkMode(!state.linking));
+  ui.mergeCancel.addEventListener('click', () => setLinkMode(false));
+  ui.mergeConfirm.addEventListener('click', confirmMerge);
+  ui.mergeName.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); confirmMerge(); }
+  });
   ui.autoCelebrate.addEventListener('change', () => {
     state.celebrate = ui.autoCelebrate.checked;
   });
@@ -974,7 +1142,9 @@ function wire() {
   ui.doneAgain.addEventListener('click', () => {
     state.clusters = [];
     state.names.clear();
+    state.linkPicks = [];
     ui.clusters.replaceChildren();
+    setLinkMode(false);
     setView('configure');
     toast('Pick another folder to scan', '', 'refresh');
   });
@@ -990,7 +1160,11 @@ function wire() {
     if (event.key === 'Enter') { event.preventDefault(); saveModal(ui.modalName.value); }
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !ui.modalLayer.hidden) closeModal();
+    if (event.key === 'Escape' && !ui.modalLayer.hidden) { closeModal(); return; }
+    // Escape leaves link mode too, but never while the naming dialog is open.
+    if (event.key === 'Escape' && ui.modalLayer.hidden && state.linking) {
+      setLinkMode(false);
+    }
   });
 
   // log panel

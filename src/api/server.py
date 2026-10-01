@@ -56,7 +56,14 @@ from ..face_model import (
     models_installed,
 )
 from ..image_loader import is_supported, load_image, scan_images
-from ..main import DEFAULT_CONFIG, load_config, run_pipeline, save_named_cluster
+from ..main import (
+    DEFAULT_CONFIG,
+    load_config,
+    merge_clusters_by_memory,
+    renumber_clusters,
+    run_pipeline,
+    save_named_cluster,
+)
 from ..names_db import DEFAULT_DB_PATH, open_names_db, resolve_db_path
 from ..organizer import PhotoOrganizer, normalize_person_name
 from ..ui.preview import face_crop
@@ -186,6 +193,19 @@ class NameRequest(BaseModel):
     name: str = ""
 
 
+class MergeRequest(BaseModel):
+    """Body of ``POST /merge_clusters``.
+
+    ``name`` is optional: omitting it links the two groups for this session
+    only, while supplying one also writes the link to the name database so
+    future runs group them automatically.
+    """
+
+    cluster_a: int
+    cluster_b: int
+    name: str = ""
+
+
 class OrganizeRequest(BaseModel):
     """Body of ``POST /organize``."""
 
@@ -310,6 +330,61 @@ class ScanSession:
                     return cluster
         raise KeyError(cluster_id)
 
+    def merge_clusters(
+        self, first_id: int, second_id: int
+    ) -> Tuple[FaceCluster, FaceCluster]:
+        """Merge two clusters into one, renumbering the survivors.
+
+        This is the "same person, different age" safety net: the model cannot
+        be certain across a large age gap (or on a blurred childhood photo),
+        so the user states the ground truth.  The surviving cluster keeps the
+        lower id so it lands where the user expects on screen.
+
+        Merging is destructive but reversible in effect: nothing is deleted
+        from the database here, and re-running the scan starts from the
+        original photos.
+        """
+        with self._lock:
+            clusters = list(self.clusters)
+            by_id = {cluster.cluster_id: cluster for cluster in clusters}
+            if first_id not in by_id or second_id not in by_id:
+                raise KeyError(first_id if first_id not in by_id else second_id)
+            if first_id == second_id:
+                raise ValueError("cannot merge a cluster with itself")
+
+            keep = by_id[min(first_id, second_id)]
+            drop = by_id[max(first_id, second_id)]
+
+            merged = FaceCluster(cluster_id=keep.cluster_id)
+            merged.faces = list(keep.faces) + list(drop.faces)
+            for face in merged.faces:
+                face.cluster_id = keep.cluster_id
+
+            survivors = [merged] + [
+                cluster for cluster in clusters
+                if cluster.cluster_id not in (keep.cluster_id, drop.cluster_id)
+            ]
+            # Renumber 0..n-1 so the UI never sees a gap in the ids.
+            for index, cluster in enumerate(survivors):
+                cluster.cluster_id = index
+                for face in cluster.faces:
+                    face.cluster_id = index
+
+            self.clusters = survivors
+            self.names = {
+                cluster.cluster_id: self.names.get(cluster.cluster_id)
+                for cluster in survivors
+            }
+            self.auto_labels = {
+                cluster.cluster_id: self.auto_labels.get(cluster.cluster_id)
+                for cluster in survivors
+            }
+            self.names = {
+                key: value for key, value in self.names.items() if key is not None
+            }
+            self._thumbs.clear()
+            return merged, drop
+
     def thumbs_for(self, cluster: FaceCluster) -> List[Dict[str, Any]]:
         """Serialize one cluster, rendering (and caching) face thumbnails."""
         faces: List[Dict[str, Any]] = []
@@ -391,16 +466,55 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             clusters = FaceClusterer.from_config(config).cluster(stats.records)
 
             tolerance = _as_float(config.get("tolerance", 0.5), 0.5)
-            auto_labels: Dict[int, str] = {}
             use_db = bool(config.get("use_db", True))
             db = open_names_db(config) if use_db else None
             try:
+                auto_labels: Dict[int, str] = {}
                 for cluster in clusters:
                     if cluster.centroid is None:
                         continue
-                    match = db.find_match(cluster.centroid, tolerance) if db else None
+                    match = (
+                        db.find_match(
+                            cluster.centroid, tolerance,
+                            eye_embedding_centroid=cluster.eye_centroid,
+                        )
+                        if db
+                        else None
+                    )
                     if match is not None:
                         auto_labels[cluster.cluster_id] = match.person_name
+                        # Tag the faces so a later fuse can recover the name
+                        # from the merged group without re-querying the DB.
+                        for face in cluster.faces:
+                            face.person_name = match.person_name
+                        logger.debug(
+                            "Cluster #%s auto-labeled %r at %.3f (%s).",
+                            cluster.cluster_id, match.person_name,
+                            match.distance,
+                            "eye region + face" if match.used_eye else "face only",
+                        )
+                # Groups the database already knows are one person (a merge
+                # confirmed in an earlier run) are fused, so a manual merge
+                # survives future scans.
+                if db is not None:
+                    fused = renumber_clusters(
+                        merge_clusters_by_memory(clusters, auto_labels)
+                    )
+                    if len(fused) != len(clusters):
+                        logger.info(
+                            "Fused %d group(s) remembered as the same person.",
+                            len(clusters) - len(fused),
+                        )
+                        clusters = fused
+                        auto_labels = {}
+                        for cluster in clusters:
+                            names = {
+                                face.person_name
+                                for face in cluster.faces
+                                if face.person_name
+                            }
+                            if len(names) == 1:
+                                auto_labels[cluster.cluster_id] = names.pop()
             finally:
                 if db is not None:
                     db.close()
@@ -548,6 +662,10 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
                 "photos": len(cluster.image_paths),
                 "name": name or "",
                 "auto": cluster.cluster_id in auto,
+                # Age-invariance diagnostics: how much of this group could be
+                # fingerprinted by the eye region, so the UI can say when a
+                # group leaned on the whole face alone (small/blurred photos).
+                "eye_coverage": round(cluster.eye_coverage, 3),
                 "faces": faces,
             })
         return {"clusters": payload, "count": len(payload)}
@@ -579,6 +697,91 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
                     db.close()
         return {"ok": True, "cluster_id": cluster.cluster_id,
                 "name": name or "", "remembered": persisted}
+
+    @app.post("/merge_clusters")
+    def merge_clusters(request: MergeRequest) -> Dict[str, Any]:
+        """Link two clusters as "the same person, at different ages".
+
+        Neither age-invariance nor manual linking is 100% accurate, so this
+        is the escape hatch: the user asserts the ground truth, the two groups
+        become one for this run, and — when a name is supplied — the
+        knowledge is written to the name database so future runs match
+        automatically.
+
+        Body::
+
+            {"cluster_a": 0, "cluster_b": 3, "name": "Alex"}
+
+        ``name`` is optional: merging without one keeps the groups together
+        for this session only.
+        """
+        if session.state in (STATE_IDLE, STATE_SCANNING):
+            raise HTTPException(
+                status_code=409,
+                detail="Nothing to merge yet — POST /scan first.")
+        if session.state == STATE_ORGANIZING:
+            raise HTTPException(status_code=409,
+                                detail="Cannot merge while sorting.")
+        if request.cluster_a == request.cluster_b:
+            raise HTTPException(status_code=400,
+                                detail="Pick two different groups.")
+
+        try:
+            merged, dropped = session.merge_clusters(
+                request.cluster_a, request.cluster_b
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No cluster #{exc.args[0]} in this scan.")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        name = normalize_person_name(request.name)
+        with session._lock:
+            if name:
+                session.names[merged.cluster_id] = name
+                session.auto_labels.pop(merged.cluster_id, None)
+            if session.state == STATE_DONE:
+                # The grouping changed, so the previous sort is stale.
+                session.state = STATE_READY
+
+        persisted = False
+        merged_name = name
+        if not merged_name:
+            # Reuse an existing name if either group already had one, so the
+            # merge can still teach the database something.
+            with session._lock:
+                merged_name = session.names.get(request.cluster_a)
+                merged_name = merged_name or session.names.get(
+                    request.cluster_b
+                )
+        if merged_name and session.config.get("use_db", True):
+            db = open_names_db(session.config)
+            try:
+                if db is not None:
+                    persisted = save_named_cluster(db, merged, merged_name)
+                    if not request.name:
+                        # nothing else to merge into: this *is* the memory
+                        session.names[merged.cluster_id] = merged_name
+            finally:
+                if db is not None:
+                    db.close()
+
+        logger.info(
+            "Merged cluster #%s into #%s (%d + %d faces)%s.",
+            dropped.cluster_id, merged.cluster_id, dropped.size, merged.size,
+            f" as {merged_name!r}" if merged_name else "",
+        )
+        return {
+            "ok": True,
+            "cluster_id": merged.cluster_id,
+            "merged_id": dropped.cluster_id,
+            "size": merged.size,
+            "photos": len(merged.image_paths),
+            "name": session.names.get(merged.cluster_id) or "",
+            "remembered": persisted,
+        }
 
     def _scoped_photo(name: str) -> Path:
         """Resolve ``name`` to an image *inside the folder being scanned*.

@@ -112,6 +112,9 @@ Defaults live in [`config.yaml`](config.yaml):
 | `unknown_folder` | `_unknown` | Folder for skipped clusters |
 | `names_db` | `./facesort_names.db` | Remembered people (SQLite); empty disables auto-labelling. The default spelling resolves to `%LOCALAPPDATA%\FaceSort\facesort_names.db` (`~/Library/Application Support/…`, `$XDG_DATA_HOME/…`), **not** the working directory; give an explicit path to override, or set `FACEORG_DATA_DIR` |
 | `workers` | `0` | Worker processes for the vision stage: `0` = auto (`cpu_count // 2`, max 4), `1` = single process |
+| `use_eye_regions` | `true` | Extract a second periocular fingerprint per face (see [Age invariance](#age-invariance-childhood-adult-photos)); `false` restores whole-face-only clustering |
+| `weight_full_face` | `0.4` | Whole-face share of the fused distance |
+| `weight_eye_region` | `0.6` | Eye-region share of the fused distance (should sum to 1 with the above) |
 
 Supported image formats: `jpg`, `jpeg`, `png`, `bmp`, `webp` (plus `heic`
 optionally).
@@ -246,6 +249,78 @@ python -m src.main --tolerance 0.45 --min-faces 3 -v
 `python -m src.cli` is an alias for the same command. Run
 `python -m src.main --help` for the full list of options.
 
+## Age invariance (childhood ↔ adult photos)
+
+A whole-face ArcFace embedding encodes face *shape* as much as identity, and
+shape changes as a child grows — the jaw widens and lengthens, the cheeks
+round out, the nose lengthens. Cosine distance between a childhood photo and
+the same person's adult photo is therefore often larger than the clustering
+tolerance, which splits one person into a "child" group and an "adult" group.
+
+FaceSort fixes this with a **second fingerprint per face** and a blended
+distance.
+
+### The periocular ("eye region") embedding
+
+`src/eye_embedder.py` extracts an additional embedding from the region that
+changes least with age: the brows, both eyes and the bridge of the nose
+(the "periocular" region).
+
+Rather than cropping pixels and resizing them, it **re-frames the five
+landmarks** and lets the existing ArcFace recogniser do what it already does.
+The transform is driven by where the landmarks sit, so pulling the nose and
+mouth points *towards* the eye line (`PERIOCULAR_SPREAD = 0.55`) forces a
+tighter zoom: the eyes land on ArcFace's template positions and the mouth is
+pushed off the bottom edge. The model normalises the region itself rather
+than our own resize inventing a second geometry.
+
+Rendering the warp at spreads 0.3 / 0.45 / 0.6 / 0.8 / 1.0 confirms the
+direction: 1.0 reproduces the whole face, 0.55 is eyes-and-brows, 0.3 is eyes
+only. Below ~0.35 the inter-eye distance distorts too much to mean anything.
+
+Cost: one extra forward pass of the recognition net on a 112×112 input.
+Faces whose eye region is under 24px are skipped (too small or too blurred to
+carry signal) and fall back to the whole-face vector — which is exactly the
+low-resolution childhood photo case the manual merge exists for.
+
+### The fused distance
+
+`src/fusion.py` blends the two cosine similarities:
+
+```
+fused_similarity = 0.4 · cos(full_a, full_b) + 0.6 · cos(eye_a, eye_b)
+fused_distance   = 1 − fused_similarity
+```
+
+The eye region is weighted higher because it is the age-stable part, but the
+whole-face term is never dropped — periocular alone is a weak discriminator
+between siblings. Both similarities are cosine distances in `[0, 2]`, so the
+blend shares that range and the existing `tolerance` keeps its meaning.
+
+When either side has no eye vector the blend **renormalises over the
+evidence that exists** rather than dropping the comparison. Clustering uses a
+precomputed distance matrix (not a Python callable per pair) because the
+pipeline is CPU-bound; with mixed availability the clusterer runs both
+modalities separately and reconciles them in `relabel_ages()`.
+
+### Manual merge — the safety net
+
+No method is 100% across a wide age gap, so the review screen has a
+**Same person?** mode: pick two groups, and they become one. Supplying a
+name also writes the link to the name database, and `merge_clusters_by_memory()`
+fuses groups the database already knows are one person — so a merge confirmed
+once survives every later scan even when the fused distance did not group them
+on its own.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `use_eye_regions` | `true` | Extract the second fingerprint (set `false` for the old behaviour) |
+| `weight_full_face` | `0.4` | Whole-face share of the fused distance |
+| `weight_eye_region` | `0.6` | Eye-region share (the two should sum to 1) |
+
+`GET /clusters` reports `eye_coverage` per group; the UI shows a note when a
+group leaned on the whole face alone, which is the hint to use the merge.
+
 ## Desktop app (Electron + Python)
 
 The desktop app is two pieces that meet on a loopback socket:
@@ -271,7 +346,8 @@ Four views, driven by one small state machine:
    (`/photo`), *Details* flips the card in 3D to show the destination folder
    and every file, naming opens a slide-up dialog with suggestions, and a
    toast confirms each name. Cards are titled by the person's name once set,
-   and the filter box narrows them as you type.
+   and the filter box narrows them as you type. **Same person?** links two
+   groups that should be one (see [Age invariance](#age-invariance-childhood-adult-photos)).
 4. **Finish** — animated checkmark, per-folder counts, "open output folder"
    and an optional confetti celebration.
 
@@ -518,6 +594,7 @@ gender-age graphs are never called, so they are left out.
 | `POST` | `/scan` | Validates the input folder, then scans on a background thread. Body: `input_folder`, `output_folder`, `tolerance`, `min_faces_per_cluster`, `mode`, `unknown_folder`, `workers`, `use_db` |
 | `GET` | `/clusters` | Every cluster with its faces: photo name, bbox, detection score and a cropped JPEG **data URL** thumbnail |
 | `POST` | `/name_cluster` | Name a group (`name_cluster: {cluster_id, name}`). Empty name → unknown folder; non-empty names are remembered in the SQLite DB for future scans |
+| `POST` | `/merge_clusters` | Link two groups as one person — the manual age bridge. Body `{cluster_a, cluster_b, name?}`; `name` is optional (omit it to link for this run only). Groups the database already knows are one person are re-fused on every scan |
 | `POST` | `/organize` | Copies/moves every photo into `output_folder/<person>/` **on a worker thread** — returns `{"started": true, "total": n}`; follow `/status` for per-file progress and read the report from `status.results` |
 | `GET` | `/thumb?name=` | Small (420 px) JPEG of one photo **inside the scanned folder** — the live scan preview. Scoped by design: only a *basename* is accepted and resolved inside the input folder, so the endpoint can never be used to read arbitrary files |
 | `GET` | `/photo?name=` | The same photo at 1600 px, for the review lightbox. Identical scoping; renders are memoised on `(path, mtime, size)` in a 64-entry cache |
@@ -623,6 +700,7 @@ and an untestable code path would be worse than none.
 ```bash
 python tests/test_pipeline.py    # image loader, detector, embedder
 python tests/test_clusterer.py   # clustering, de-duplication, config mapping
+python tests/test_age_invariance.py  # periocular landmarks, fused distance, age pairing
 python tests/test_organizer.py   # folders, copy/move, name collisions
 python tests/test_names_db.py    # persistent name DB, matching, blending
 python tests/test_preview.py     # thumbnail montage, temp files, viewer
@@ -648,7 +726,9 @@ FaceSort/
 │   ├── image_loader.py  # scans the input folder, skips corrupt files
 │   ├── face_model.py    # shared buffalo_l / onnxruntime CPU model (offline)
 │   ├── detector.py      # face detection (+ multiprocess pool, M6)
-│   ├── embedder.py      # face embeddings
+│   ├── embedder.py      # face embeddings (whole-face + periocular)
+│   ├── eye_embedder.py  # periocular landmarks & age-stable fingerprint
+│   ├── fusion.py        # age-invariant fused distance (pure maths)
 │   ├── clusterer.py     # clustering of embeddings
 │   ├── organizer.py     # copies/moves photos into named folders
 │   ├── names_db.py      # persistent name database, SQLite (M3)
@@ -675,6 +755,7 @@ FaceSort/
 ├── tests/
 │   ├── test_pipeline.py
 │   ├── test_clusterer.py
+│   ├── test_age_invariance.py
 │   ├── test_organizer.py
 │   ├── test_names_db.py
 │   ├── test_preview.py

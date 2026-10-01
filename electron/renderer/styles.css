@@ -670,6 +670,77 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
+/* -------------------------------------- 3b · manual age bridge ------ */
+/* The safety net for cases the model cannot solve: two groups, one person. */
+.merge-tray {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  padding: var(--s4) var(--s6);
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule-firm);
+  animation: rise var(--dur) var(--ease) both;
+}
+
+.merge-slots {
+  display: flex;
+  align-items: stretch;
+  gap: var(--s3);
+  max-width: 720px;
+}
+.merge-link {
+  align-self: center;
+  width: 18px; height: 18px;
+  color: var(--ink-4);
+}
+.merge-slot {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: var(--s3);
+  background: var(--bg);
+  border: 1px dashed var(--rule-firm);
+  border-radius: 6px;
+}
+.merge-slot .eyebrow { margin-bottom: 0; }
+.merge-slot-empty { font-size: var(--t-xs); color: var(--ink-4); }
+.merge-slot.is-filled {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+.merge-slot.is-filled .merge-slot-empty { color: var(--ink); font-weight: 500; }
+.merge-slot-wrong { border-style: solid; border-color: var(--danger); }
+
+.merge-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+  max-width: 720px;
+  margin-top: var(--s3);
+}
+.merge-name { flex: 1; min-width: 0; }
+.merge-hint { max-width: 72ch; margin-top: var(--s3); }
+
+/* a card that is part of the pending link */
+.flip.is-picked .flip-face {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.flip.is-dimmed { opacity: .38; }
+.pick-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--t-xs);
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.pick-flag .icon { width: 12px; height: 12px; }
+
 /* ---------------------------------------------------- 3 · review ------ */
 .sheet-bar {
   position: sticky; top: 0; z-index: 5;
@@ -688,6 +759,9 @@ input[type="range"]::-moz-range-thumb {
   width: 13px; height: 13px; color: var(--ink-4); pointer-events: none;
 }
 .search input { width: 190px; padding: 7px 9px 7px 27px; }
+
+.sheet-bar-actions > * { flex: none; }
+.search { flex: 0 1 auto; min-width: 0; }
 
 .switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; user-select: none; }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -715,6 +789,7 @@ input[type="range"]::-moz-range-thumb {
   gap: var(--s5);
   padding: var(--s5) var(--s6) var(--s8);
 }
+.clusters.is-linking { cursor: crosshair; }
 
 /* flip card */
 .flip { perspective: 1400px; height: 100%; min-height: 252px; }
@@ -756,6 +831,13 @@ input[type="range"]::-moz-range-thumb {
   line-height: var(--lh-tight);
 }
 .card-meta { margin-top: 3px; font-size: var(--t-xs); color: var(--ink-4); }
+/* only shown when the eye region was unusable — points the user at the
+   manual link rather than leaving a silent gap in quality */
+.card-note {
+  margin-top: 3px;
+  font-size: var(--t-xs);
+  color: var(--warn);
+}
 
 /* a badge is a word, not a pill: no fill, no radius */
 .badge {

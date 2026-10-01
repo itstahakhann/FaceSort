@@ -84,6 +84,11 @@
       <path d="M4 20 15.5 8.5M16.8 7.2 20 10.4M6.5 4.5l1.6 3.4 3.4 1.6-3.4 1.6-1.6 3.4-1.6-3.4L1.5 9.5l3.4-1.6z" stroke-linecap="round" stroke-linejoin="round" />
     </symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round" /></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24">
+      <path d="M9.5 14.5 14.5 9.5" stroke-linecap="round" />
+      <path d="M13 7.5 15 5.5a3.5 3.5 0 0 1 5 5l-2 2M11 16.5 9 18.5a3.5 3.5 0 0 1-5-5l2-2"
+            stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
   </svg>
 
   <!-- ========================================================= shell ==== -->
@@ -300,6 +305,12 @@
                 <input id="cluster-search" type="search" placeholder="Filter by name"
                        aria-label="Filter groups by name" />
               </div>
+              <!-- Manual age bridge: pick two groups, assert they are one person. -->
+              <button id="link-toggle" class="btn quiet" type="button"
+                      aria-pressed="false">
+                <svg class="icon"><use href="#i-link" /></svg>
+                <span>Same person?</span>
+              </button>
               <label class="switch">
                 <input type="checkbox" id="auto-celebrate" checked />
                 <span class="switch-track" aria-hidden="true"></span>
@@ -312,6 +323,39 @@
               </button>
             </div>
           </div>
+
+          <!-- merge tray: appears only in link mode -->
+          <div class="merge-tray" id="merge-tray" hidden>
+            <div class="merge-slots">
+              <div class="merge-slot" id="merge-slot-a" data-slot="a">
+                <span class="eyebrow">First group</span>
+                <span class="merge-slot-empty">Select a group</span>
+              </div>
+              <svg class="icon merge-link" aria-hidden="true"><use href="#i-link" /></svg>
+              <div class="merge-slot" id="merge-slot-b" data-slot="b">
+                <span class="eyebrow">Second group</span>
+                <span class="merge-slot-empty">Select a group</span>
+              </div>
+            </div>
+            <div class="merge-bar">
+              <div class="merge-name">
+                <label class="label" for="merge-name">Who is it?</label>
+                <input id="merge-name" type="text" autocomplete="off"
+                       placeholder="Leave blank to link for this run only" />
+              </div>
+              <button id="merge-cancel" class="btn quiet" type="button">Cancel</button>
+              <button id="merge-confirm" class="btn primary" type="button" disabled>
+                <svg class="icon"><use href="#i-check" /></svg>
+                <span>Link groups</span>
+              </button>
+            </div>
+            <p class="note merge-hint">
+              Use this when one person appears in two groups — usually a
+              childhood photo and an adult one. Naming them here also
+              remembers the link, so future scans group them on their own.
+            </p>
+          </div>
+
           <div class="clusters" id="clusters"></div>
         </section>
 

@@ -21,9 +21,11 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
+
+from .fusion import FusedMetric
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,16 @@ __all__ = [
     "DEFAULT_DB_PATH",
 ]
 
+#: Schema columns added after the first release, applied on open.  Kept as a
+#: module constant so the migration is documented in one place and testable.
+MIGRATED_COLUMNS: Mapping[str, Mapping[str, str]] = {
+    "persons": {
+        "eye_embedding": "BLOB",
+        "eye_dims": "INTEGER",
+        "eye_faces_seen": "INTEGER NOT NULL DEFAULT 0",
+    },
+}
+
 
 def cosine_distance(a, b) -> float:
     """Cosine distance (0 = identical direction, 2 = opposite).
@@ -131,18 +143,33 @@ def _now() -> str:
 
 @dataclass
 class Person:
-    """One remembered person (SPEC §8 ``Person``)."""
+    """One remembered person (SPEC §8 ``Person``).
+
+    ``eye_embedding_centroid`` is the periocular mean used for age-invariant
+    matching (see :mod:`src.fusion`).  It is ``None`` for rows written before
+    this column existed, and for people whose photos were too small or blurred
+    to fingerprint — both are read back without error, and matching falls back
+    to the whole-face vector.
+    """
 
     person_name: str
     embedding_centroid: np.ndarray
+    eye_embedding_centroid: Optional[np.ndarray] = None
     sample_image_paths: List[str] = field(default_factory=list)
     faces_seen: int = 1
+    eye_faces_seen: int = 0
     created_at: str = ""
     updated_at: str = ""
 
     @property
     def dims(self) -> int:
         return int(self.embedding_centroid.size)
+
+    @property
+    def has_eye_embedding(self) -> bool:
+        """True when a usable periocular centroid is stored."""
+        vector = self.eye_embedding_centroid
+        return vector is not None and int(vector.size) > 0
 
 
 @dataclass
@@ -152,6 +179,11 @@ class PersonMatch:
     person_name: str
     distance: float
     sample_image_paths: List[str] = field(default_factory=list)
+    #: Which signals produced ``distance`` — lets the UI explain that a match
+    #: leaned on the eye region (age-invariant) or the whole face (fallback).
+    used_eye: bool = False
+    full_distance: Optional[float] = None
+    eye_distance: Optional[float] = None
 
 
 class NamesDB:
@@ -181,7 +213,34 @@ class NamesDB:
             )
             """
         )
+        # Periocular ("eye region") centroid, added after the first release.
+        # Nullable on purpose: rows written by an older build have no eye
+        # embedding, and a person remembered from low-resolution photos may
+        # have none either. Matching falls back to the whole-face vector in
+        # both cases rather than failing.
+        self._ensure_columns("persons", MIGRATED_COLUMNS["persons"])
         self._conn.commit()
+
+    def _ensure_columns(
+        self, table: str, columns: Mapping[str, str]
+    ) -> None:
+        """Add any missing columns to ``table`` (idempotent migration).
+
+        SQLite has no ``ADD COLUMN IF NOT EXISTS``, so the existing columns
+        are read back and only the genuinely new ones are added. This is what
+        lets an old database file open without a manual migration step.
+        """
+        present = {
+            str(row["name"])
+            for row in self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, definition in columns.items():
+            if name in present:
+                continue
+            self._conn.execute(
+                f"ALTER TABLE {table} ADD COLUMN {name} {definition}"
+            )
+            logger.info("Migrated %s: added column %r", table, name)
 
     def close(self) -> None:
         if self._conn is not None:
@@ -201,6 +260,8 @@ class NamesDB:
         embedding_centroid,
         sample_image_paths: Sequence[Union[str, Path]] = (),
         faces_seen: int = 1,
+        eye_embedding_centroid=None,
+        eye_faces_seen: Optional[int] = None,
     ) -> Person:
         """Remember (or refresh) a person.
 
@@ -208,12 +269,34 @@ class NamesDB:
         one weighted by how many faces each side contributed, so the stored
         centroid slowly converges on the person's true average.  Sample
         paths are merged and capped.
+
+        ``eye_embedding_centroid`` is the periocular mean used for
+        age-invariant matching.  It is blended by the same rule as the
+        whole-face centroid and is optional: passing ``None`` (or zero
+        ``eye_faces_seen``) leaves any previously stored eye centroid intact
+        rather than discarding it, so a run over low-resolution photos cannot
+        erase what a good run learned.
         """
         name = str(person_name or "").strip()
         if not name:
             raise ValueError("person_name must not be empty")
         centroid = _unit(embedding_centroid)
         faces_seen = max(1, int(faces_seen))
+
+        try:
+            eye_centroid = None if eye_embedding_centroid is None else _unit(
+                eye_embedding_centroid
+            )
+        except ValueError:
+            logger.warning(
+                "Discarding an unusable eye centroid for %r; the whole-face "
+                "vector will be used for matching.", name,
+            )
+            eye_centroid = None
+        eye_faces = (
+            0 if eye_centroid is None
+            else max(1, int(eye_faces_seen if eye_faces_seen is not None else 1))
+        )
 
         samples = self._merge_samples([], _clean_samples(sample_image_paths))
         row = self._get_row(name)
@@ -223,8 +306,9 @@ class NamesDB:
                 """
                 INSERT INTO persons (person_name, embedding, dims,
                                      sample_image_paths, faces_seen,
+                                     eye_embedding, eye_dims, eye_faces_seen,
                                      created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     name,
@@ -232,6 +316,9 @@ class NamesDB:
                     centroid.size,
                     json.dumps(samples),
                     faces_seen,
+                    None if eye_centroid is None else eye_centroid.tobytes(),
+                    None if eye_centroid is None else eye_centroid.size,
+                    eye_faces,
                     now,
                     now,
                 ),
@@ -250,11 +337,36 @@ class NamesDB:
                 blended = centroid
             samples = self._merge_samples(_decode_samples(row["sample_image_paths"]),
                                           samples)
+
+            previous_eye = self._stored_eye_vector(row)
+            previous_eye_faces = max(0, int(row["eye_faces_seen"] or 0))
+            if eye_centroid is None:
+                # Nothing new to learn: keep whatever was stored before.
+                eye_blob = previous_eye
+                eye_faces_stored = previous_eye_faces
+            elif previous_eye is not None and previous_eye.size == eye_centroid.size:
+                total = previous_eye_faces + eye_faces
+                blended_eye = _unit(
+                    previous_eye * previous_eye_faces + eye_centroid * eye_faces
+                )
+                eye_blob = blended_eye
+                eye_faces_stored = total
+            else:
+                if previous_eye is not None:
+                    logger.warning(
+                        "Eye embedding size for %r changed (%d -> %d); "
+                        "replacing it.", name, previous_eye.size, eye_centroid.size,
+                    )
+                eye_blob = eye_centroid
+                eye_faces_stored = eye_faces
+
             self._conn.execute(
                 """
                 UPDATE persons
                    SET person_name = ?, embedding = ?, dims = ?,
-                       sample_image_paths = ?, faces_seen = ?, updated_at = ?
+                       sample_image_paths = ?, faces_seen = ?,
+                       eye_embedding = ?, eye_dims = ?, eye_faces_seen = ?,
+                       updated_at = ?
                  WHERE id = ?
                 """,
                 (
@@ -263,6 +375,9 @@ class NamesDB:
                     blended.size,
                     json.dumps(samples),
                     previous_faces + faces_seen,
+                    None if eye_blob is None else eye_blob.tobytes(),
+                    None if eye_blob is None else int(eye_blob.size),
+                    eye_faces_stored,
                     _now(),
                     row["id"],
                 ),
@@ -273,8 +388,9 @@ class NamesDB:
         if person is None:  # pragma: no cover - concurrency is not a thing here
             raise sqlite3.OperationalError("person disappeared after upsert")
         logger.debug(
-            "Remembered %r (%d face(s), %d sample photo(s)).",
-            name, person.faces_seen, len(person.sample_image_paths),
+            "Remembered %r (%d face(s), %d eye region(s), %d sample photo(s)).",
+            name, person.faces_seen, person.eye_faces_seen,
+            len(person.sample_image_paths),
         )
         return person
 
@@ -302,13 +418,23 @@ class NamesDB:
         return int(row["n"])
 
     def find_match(
-        self, embedding_centroid, tolerance: float = DEFAULT_TOLERANCE
+        self,
+        embedding_centroid,
+        tolerance: float = DEFAULT_TOLERANCE,
+        eye_embedding_centroid=None,
+        metric: Optional[FusedMetric] = None,
     ) -> Optional[PersonMatch]:
         """Closest known person whose centroid is within ``tolerance``.
 
-        Distances are cosine distances — the same metric the clusterer
-        uses — so ``tolerance`` means exactly what it means for
-        clustering (SPEC F11 / F4).
+        Distances are the same fused distance the clusterer uses (see
+        :mod:`src.fusion`), so ``tolerance`` means exactly what it means for
+        clustering — and a person's remembered childhood photos match their
+        adult photos through the eye region.
+
+        When a person has no stored eye centroid (an older database row, or
+        photos that were too small to fingerprint) the comparison falls back
+        to the whole face, and the returned :class:`PersonMatch` says so via
+        ``used_eye=False``.
         """
         if embedding_centroid is None:
             return None
@@ -318,6 +444,14 @@ class NamesDB:
             logger.warning("Cannot match against the name DB: %s", exc)
             return None
 
+        metric = metric or FusedMetric()
+        eye = None
+        if eye_embedding_centroid is not None:
+            try:
+                eye = _unit(eye_embedding_centroid)
+            except ValueError:
+                eye = None
+
         matches: List[PersonMatch] = []
         for person in self.list_persons():
             if person.dims != centroid.size:
@@ -326,15 +460,33 @@ class NamesDB:
                     person.person_name, person.dims, centroid.size,
                 )
                 continue
-            distance = cosine_distance(centroid, person.embedding_centroid)
-            if distance <= tolerance:
-                matches.append(
-                    PersonMatch(
-                        person_name=person.person_name,
-                        distance=distance,
-                        sample_image_paths=list(person.sample_image_paths),
-                    )
+            person_eye = person.eye_embedding_centroid
+            usable_eye = (
+                eye is not None
+                and person_eye is not None
+                and person_eye.size == eye.size
+            )
+            distance = metric(
+                centroid, person.embedding_centroid,
+                eye if usable_eye else None,
+                person_eye if usable_eye else None,
+            )
+            if distance is None or distance > tolerance:
+                continue
+            matches.append(
+                PersonMatch(
+                    person_name=person.person_name,
+                    distance=float(distance),
+                    sample_image_paths=list(person.sample_image_paths),
+                    used_eye=usable_eye,
+                    full_distance=cosine_distance(
+                        centroid, person.embedding_centroid
+                    ),
+                    eye_distance=(
+                        cosine_distance(eye, person_eye) if usable_eye else None
+                    ),
                 )
+            )
         if not matches:
             return None
 
@@ -350,6 +502,121 @@ class NamesDB:
             )
         return best
 
+    def merge_persons(
+        self,
+        keep_name: str,
+        other_name: str,
+    ) -> Optional[Person]:
+        """Fold ``other_name`` into ``keep_name`` and delete it.
+
+        This is the "same person, different age" safety net: the user states
+        the ground truth, and both centroids are combined (weighted by how
+        many faces each contributed) so future runs match the merged person
+        through either signal.
+
+        The name that survives is ``keep_name`` — pass the one the user wants
+        to keep.  Returns the merged person, or ``None`` if either name was
+        unknown or they are the same row.
+        """
+        keep = str(keep_name or "").strip()
+        other = str(other_name or "").strip()
+        if not keep or not other:
+            raise ValueError("both names must not be empty")
+        if keep.lower() == other.lower():
+            raise ValueError("cannot merge a person into themselves")
+
+        keep_row = self._get_row(keep)
+        other_row = self._get_row(other)
+        if keep_row is None or other_row is None:
+            missing = keep if keep_row is None else other
+            logger.warning("Cannot merge: %r is not in the database.", missing)
+            return None
+
+        keep_faces = max(1, int(keep_row["faces_seen"]))
+        other_faces = max(1, int(other_row["faces_seen"]))
+        keep_vec = np.frombuffer(keep_row["embedding"], dtype=np.float32)
+        other_vec = np.frombuffer(other_row["embedding"], dtype=np.float32)
+        if keep_vec.size != other_vec.size:
+            raise ValueError(
+                "Cannot merge: embedding sizes differ "
+                f"({keep_vec.size} vs {other_vec.size})."
+            )
+        merged = _unit(keep_vec * keep_faces + other_vec * other_faces)
+
+        merged_eye = self._merge_eye_vectors(keep_row, other_row, keep, other)
+
+        samples = self._merge_samples(
+            _decode_samples(keep_row["sample_image_paths"]),
+            _decode_samples(other_row["sample_image_paths"]),
+        )
+        self._conn.execute(
+            """
+            UPDATE persons
+               SET embedding = ?, dims = ?, sample_image_paths = ?,
+                   faces_seen = ?, eye_embedding = ?, eye_dims = ?,
+                   eye_faces_seen = ?, updated_at = ?
+             WHERE id = ?
+            """,
+            (
+                merged.tobytes(),
+                merged.size,
+                json.dumps(samples),
+                keep_faces + other_faces,
+                None if merged_eye is None else merged_eye.tobytes(),
+                None if merged_eye is None else int(merged_eye.size),
+                keep_faces + other_faces if merged_eye is not None else 0,
+                _now(),
+                keep_row["id"],
+            ),
+        )
+        self._conn.execute(
+            "DELETE FROM persons WHERE id = ?", (other_row["id"],)
+        )
+        self._conn.commit()
+        logger.info(
+            "Merged %r into %r (%d + %d faces).", other, keep, other_faces, keep_faces,
+        )
+        return self.get_person(keep)
+
+    def _merge_eye_vectors(
+        self,
+        keep_row: sqlite3.Row,
+        other_row: sqlite3.Row,
+        keep: str,
+        other: str,
+    ) -> Optional[np.ndarray]:
+        """Combine two stored eye centroids, tolerating either being absent."""
+        keep_eye = self._stored_eye_vector(keep_row)
+        other_eye = self._stored_eye_vector(other_row)
+        if keep_eye is None:
+            return other_eye
+        if other_eye is None:
+            return keep_eye
+        if keep_eye.size != other_eye.size:
+            logger.warning(
+                "Eye embedding sizes differ for %r (%d) and %r (%d); keeping "
+                "the first one's eye centroid.",
+                keep, keep_eye.size, other, other_eye.size,
+            )
+            return keep_eye
+        keep_faces = max(1, int(keep_row["eye_faces_seen"] or 1))
+        other_faces = max(1, int(other_row["eye_faces_seen"] or 1))
+        return _unit(keep_eye * keep_faces + other_eye * other_faces)
+
+    @staticmethod
+    def _stored_eye_vector(row: sqlite3.Row) -> Optional[np.ndarray]:
+        """Read a row's eye centroid, tolerating older rows without one."""
+        try:
+            blob = row["eye_embedding"]
+        except (IndexError, KeyError):
+            return None  # pragma: no cover - column always exists post-migration
+        if blob is None:
+            return None
+        vector = np.frombuffer(blob, dtype=np.float32)
+        if vector.size == 0 or not np.all(np.isfinite(vector)):
+            return None
+        return vector
+
     # --------------------------------------------------------------- helpers
     def _get_row(self, person_name: str) -> Optional[sqlite3.Row]:
         return self._conn.execute(
@@ -359,11 +626,14 @@ class NamesDB:
 
     @staticmethod
     def _row_to_person(row: sqlite3.Row) -> Person:
+        eye = NamesDB._stored_eye_vector(row)
         return Person(
             person_name=row["person_name"],
             embedding_centroid=np.frombuffer(row["embedding"], dtype=np.float32),
+            eye_embedding_centroid=eye,
             sample_image_paths=_decode_samples(row["sample_image_paths"]),
             faces_seen=int(row["faces_seen"]),
+            eye_faces_seen=int(row["eye_faces_seen"] or 0),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
