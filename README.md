@@ -348,13 +348,35 @@ build.bat                :: Windows
 ./build.sh               :: macOS / Linux
 ```
 
-What it does, step by step:
+If you prefer to drive packaging from npm (the Python engine must already be
+built — see step 1 below):
+
+```cmd
+npm install              :: once - installs the Electron toolchain
+npm run electron:build   :: packages the app -> electron\release\*.exe
+```
+
+| npm script | What it does |
+|------------|--------------|
+| `npm start` | Launch the app in development mode |
+| `npm run electron:start` | Same as `npm start` (explicit name) |
+| `npm run electron:build` | Package with electron-builder (NSIS installer) |
+| `npm run dist` | Same, with the Windows target spelled out |
+| `npm run dist:portable` | Portable single-file exe (no installer) |
+| `npm run dist:dir` | Unpacked app folder in `release\win-unpacked` |
+
+What the master script does, step by step:
 
 | Step | Command | Produces |
 |------|---------|----------|
 | 0 | `python build.py models` | stages the two ONNX weights in `python_build\models\buffalo_l` |
 | 1 | `python build.py backend` → `pyinstaller --noconfirm --distpath python_build\dist --workpath python_build\build backend.spec` | the engine at `python_build\dist\backend\backend.exe` (+ `_internal\`, models included) |
-| 2 | `npm run build` (electron-builder) | `electron\release\FaceSort-Setup-1.0.0.exe` |
+| 2 | `npm run electron:build` (electron-builder) | `electron\release\FaceSort-Setup-1.0.0.exe` |
+
+Step 1 is the Python half and npm cannot run it, so after changing anything
+under `src\`, run `build.bat` (or `python build.py backend`) before
+`npm run electron:build` — otherwise the packaged app would ship the
+previous engine build.
 
 The build produces three ready-to-run `.exe` files:
 

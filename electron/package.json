@@ -9,6 +9,8 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "electron:start": "electron .",
+    "electron:build": "electron-builder",
     "build": "electron-builder",
     "dist": "electron-builder --win nsis --x64",
     "dist:dir": "electron-builder --dir --win --x64",
