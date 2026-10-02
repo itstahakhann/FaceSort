@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{{ title }}</title>
+
+<!--
+  Self-contained by design: no CDN, no webfont, no network of any kind. The
+  stylesheet and script are copied next to this file by the generator, so the
+  whole folder works from a USB stick, an email attachment or a phone with no
+  signal, and keeps working in ten years.
+-->
+<link rel="stylesheet" href="assets/css/gallery.css" />
+</head>
+<body>
+
+{% if has_password %}
+<!--
+  PASSWORD PROTECTION — CLIENT SIDE ONLY.
+
+  The SHA-256 digest below ships inside this file, so anyone who opens the
+  source can read it, and a weak password can be recovered offline with a
+  dictionary. This is a curtain against a family member or a guest who opens
+  the file casually — NOT protection against anyone who means it. Anyone who
+  can open the HTML can open the JPEG files directly, because a browser needs
+  them readable to display them.
+
+  If you need real protection, keep the photos somewhere the browser cannot
+  reach and serve this gallery through a server that checks the password.
+-->
+<div class="gate" id="gate">
+  <form class="gate-panel" id="gate-form" autocomplete="off">
+    <p class="gate-kicker">Private gallery</p>
+    <h1 class="gate-title">{{ title }}</h1>
+    <p class="gate-sub">This gallery is password protected.</p>
+    <label class="sr-only" for="gate-input">Password</label>
+    <input id="gate-input" type="password" placeholder="Password" autofocus />
+    <p class="gate-error" id="gate-error" hidden>That password is not right.</p>
+    <button type="submit" class="btn primary">Open gallery</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="app" id="app"{% if has_password %} hidden{% endif %}>
+  <header class="bar">
+    <div class="identity">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" class="icon"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="12" cy="9.5" r="3.4"/><path d="M5.6 19.4c1-3.4 3.6-5 6.4-5s5.4 1.6 6.4 5z"/></svg>
+      </span>
+      <span class="identity-text">
+        <strong>{{ title }}</strong>
+        <span class="micro">{{ subtitle }} · generated {{ generated }}</span>
+      </span>
+    </div>
+
+    <div class="bar-right">
+      <div class="search">
+        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5" stroke-linecap="round"/></svg>
+        <input id="filter" type="search" placeholder="Find someone" aria-label="Find someone by name" />
+      </div>
+      <button id="theme-toggle" class="icon-btn" type="button" aria-label="Switch theme" title="Switch theme">
+        <svg viewBox="0 0 24 24" class="icon theme-icon-dark"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5" stroke-linecap="round"/></svg>
+        <svg viewBox="0 0 24 24" class="icon theme-icon-light"><path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.3 8.3 0 1 0 20 14.5z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <!-- people index -->
+    <section class="view is-active" id="view-people">
+      <div class="sheet">
+        <p class="kicker">{{ total_photos }} photo(s)</p>
+        <h1 class="display">{{ people|length }} people</h1>
+        <div class="people" id="people-grid">
+          {% for person in people %}
+          <button class="person" type="button"
+                  data-person="{{ person.name }}"
+                  data-index="{{ loop.index0 }}"
+                  style="--delay: {{ loop.index0 * 40 }}ms">
+            <span class="person-cover">
+              <img src="{{ person.cover }}" alt="" loading="lazy" decoding="async" />
+            </span>
+            <span class="person-meta">
+              <strong>{{ person.name }}</strong>
+              <span class="micro">{{ person.count }} photo{{ '' if person.count == 1 else 's' }}</span>
+            </span>
+          </button>
+          {% endfor %}
+        </div>
+        <p class="empty" id="people-empty" hidden>Nobody matches that name.</p>
+      </div>
+    </section>
+
+    <!-- one person's photos -->
+    <section class="view" id="view-person" hidden>
+      <div class="sheet-bar">
+        <button class="back-link" id="back" type="button">
+          <svg viewBox="0 0 24 24" class="icon"><path d="M14.5 6 8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Everyone
+        </button>
+        <div class="sheet-bar-text">
+          <p class="kicker" id="person-count"></p>
+          <h2 class="title" id="person-name"></h2>
+        </div>
+      </div>
+      <div class="grid" id="photo-grid"></div>
+    </section>
+  </main>
+</div>
+
+<!-- lightbox -->
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-modal="true" aria-label="Photo viewer">
+  <button class="lb-close" id="lb-close" type="button" aria-label="Close">
+    <svg viewBox="0 0 24 24" class="icon"><path d="M6 6l12 12M18 6 6 18" stroke-linecap="round"/></svg>
+  </button>
+  <button class="lb-nav lb-prev" id="lb-prev" type="button" aria-label="Previous photo">
+    <svg viewBox="0 0 24 24" class="icon"><path d="M14.5 6 8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <button class="lb-nav lb-next" id="lb-next" type="button" aria-label="Next photo">
+    <svg viewBox="0 0 24 24" class="icon"><path d="M9.5 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+  <figure class="lb-figure">
+    <img id="lb-img" alt="" />
+    <figcaption class="lb-caption" id="lb-caption"></figcaption>
+  </figure>
+</div>
+
+<script>
+  // The digest is embedded here when a password was set. See the comment at the
+  // top of this file: this is a privacy curtain, not encryption.
+  window.__GALLERY_PASSWORD__ = {% if has_password %}"{{ password_hash }}"{% else %}""{% endif %};
+
+  window.__GALLERY__ = {{ people | tojson }};
+</script>
+<script src="assets/js/gallery.js"></script>
+</body>
+</html>

@@ -125,6 +125,19 @@ contextBridge.exposeInMainWorld('faceorg', {
         body: { names, output_folder: outputFolder },
         timeout: 300000,
       }),
+
+    /**
+     * Build an offline HTML gallery. Omitting `wait` starts a worker thread so
+     * a large library reports progress through `galleryStatus` instead of
+     * blocking the request for minutes.
+     */
+    exportGallery: (body) =>
+      call('/export_gallery', {
+        method: 'POST',
+        body: { wait: false, ...body },
+        timeout: 120000,
+      }),
+    galleryStatus: () => call('/gallery_status', { timeout: 30000 }),
     organize: (mode) =>
       call('/organize', { method: 'POST', body: mode ? { mode } : {}, timeout: 300000 }),
   },
@@ -155,6 +168,9 @@ contextBridge.exposeInMainWorld('faceorg', {
 
   pickFolder: (kind) => ipcRenderer.invoke('dialog:pick-folder', kind),
   appInfo: () => ipcRenderer.invoke('app:info'),
+
+  /** Platform, so paths can be built with the right separator. */
+  platform: process.platform,
 
   /**
    * Absolute path of a dropped File/Item. Electron removed `File.path`, so

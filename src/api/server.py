@@ -56,6 +56,12 @@ from ..face_model import (
     model_dir,
     models_installed,
 )
+from ..gallery import (
+    GalleryError,
+    GalleryOptions,
+    build_gallery,
+    photos_for_selection,
+)
 from ..image_loader import is_supported, load_image, scan_images
 from ..main import (
     DEFAULT_CONFIG,
@@ -94,6 +100,7 @@ STATE_IDLE = "idle"
 STATE_SCANNING = "scanning"
 STATE_READY = "ready"          # clusters waiting to be named
 STATE_ORGANIZING = "organizing"
+STATE_GALLERY = "gallery"          # building an HTML gallery
 STATE_DONE = "done"            # photos have been sorted
 STATE_ERROR = "error"
 
@@ -220,6 +227,26 @@ class ExportRequest(BaseModel):
     names: List[str] = Field(default_factory=list)
 
 
+class GalleryRequest(BaseModel):
+    """Body of ``POST /export_gallery``.
+
+    ``export_mode`` is ``"all"`` (everyone with recorded photos) or
+    ``"people"`` (``selected_people``). ``password`` is optional and is a
+    **client-side** gate only — see ``src/gallery.py``.
+    """
+
+    output_path: str
+    export_mode: str = Field("all", pattern="^(all|people)$")
+    selected_people: List[str] = Field(default_factory=list)
+    password: str = ""
+    include_thumbnails: bool = True
+    title: str = "FaceSort Gallery"
+    overwrite: bool = False
+    #: Wait for the build instead of polling /status. Handy for scripting;
+    #: the UI uses the background path so it can show progress.
+    wait: bool = False
+
+
 # --------------------------------------------------------------------------
 # session state
 # --------------------------------------------------------------------------
@@ -250,6 +277,10 @@ class ScanSession:
             self.scan_seconds = 0.0
             self.organize_done = 0
             self.organize_total = 0
+            self.gallery_done = 0
+            self.gallery_total = 0
+            self.gallery_current = ""
+            self.gallery_result: Optional[Dict[str, Any]] = None
             self._thumbs.clear()
             self.thumb_cache.clear()
         self._thread: Optional[threading.Thread] = None
@@ -330,6 +361,47 @@ class ScanSession:
             self.phase = ""
             self.error = message
             self.current = ""
+
+    # -- gallery export bookkeeping ---------------------------------------
+    def begin_gallery(self, total: int) -> None:
+        """Enter the gallery-building state with a progress counter.
+
+        Distinct from the organize state: the two can never run at once (both
+        would be walking the same photo files), and the UI words them
+        differently.
+        """
+        with self._lock:
+            self.state = STATE_GALLERY
+            self.phase = "building gallery"
+            self.gallery_total = total
+            self.gallery_done = 0
+            self.gallery_current = ""
+            self.gallery_result = None
+            self.error = ""
+            self._started_at = time.perf_counter()
+
+    def gallery_progress(self, done: int, total: int, current: str = "") -> None:
+        with self._lock:
+            self.gallery_done = done
+            if total:
+                self.gallery_total = total
+            self.gallery_current = current
+
+    def finish_gallery(self, payload: Dict[str, Any]) -> None:
+        with self._lock:
+            self.gallery_result = payload
+            self.gallery_done = self.gallery_total
+            self.gallery_current = ""
+            self.phase = "finished"
+            # Back to a state the rest of the API already understands.
+            self.state = STATE_READY if self.clusters else STATE_IDLE
+
+    def fail_gallery(self, message: str) -> None:
+        with self._lock:
+            self.state = STATE_ERROR
+            self.error = message
+            self.phase = ""
+            self.gallery_current = ""
 
     def cluster(self, cluster_id: int) -> FaceCluster:
         with self._lock:
@@ -576,6 +648,13 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
                 "results": session.results,
                 "scanning": state == STATE_SCANNING,
                 "organizing": state == STATE_ORGANIZING,
+                "gallery": {
+                    "building": state == STATE_GALLERY,
+                    "done": session.gallery_done,
+                    "total": session.gallery_total,
+                    "current": session.gallery_current,
+                    "result": session.gallery_result,
+                },
                 "organize": {
                     "done": session.organize_done,
                     "total": session.organize_total,
@@ -907,6 +986,129 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             "max": max((p["photos"] for p in pairs), default=0),
             "db": True,
         }
+
+    @app.post("/export_gallery")
+    def export_gallery(request: GalleryRequest) -> Dict[str, Any]:
+        """Build a self-contained, offline HTML gallery of the organized photos.
+
+        By default this starts a worker thread and returns ``{"started": true}``;
+        follow ``/status`` for per-file progress and read the finished report
+        from ``status.gallery``. Pass ``wait: true`` to block until it is done,
+        which is easier from a script.
+
+        The gallery is a folder of plain files — one HTML page plus local CSS,
+        JS and images — so it opens in any browser with no server and no
+        network, and keeps working offline forever.
+        """
+        if session.state in (STATE_SCANNING, STATE_ORGANIZING, STATE_GALLERY):
+            raise HTTPException(
+                status_code=409,
+                detail="Wait for the current job to finish before building a "
+                       "gallery.")
+        if request.export_mode == "people" and not request.selected_people:
+            raise HTTPException(
+                status_code=400,
+                detail="Choose at least one person, or switch to Export All.")
+
+        destination = Path(request.output_path).expanduser()
+        # Allow creating the parent, but not the gallery folder itself: the
+        # generator wants to own a folder it can safely replace.
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot create {destination.parent}: {exc}")
+
+        db = _relationship_db()
+        if db is None:
+            raise HTTPException(
+                status_code=400,
+                detail="The name database is disabled, so there are no "
+                       "recorded photos to put in a gallery.")
+        try:
+            try:
+                selection = photos_for_selection(
+                    db, request.export_mode, request.selected_people
+                )
+            except GalleryError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+            total = sum(len(paths) for paths in selection.values())
+        finally:
+            db.close()
+
+        if total == 0:
+            raise HTTPException(
+                status_code=404,
+                detail="There are no recorded photos for that selection yet. "
+                       "Name some groups in Review first.")
+
+        existing = destination.exists() and any(destination.iterdir())
+        if existing and not request.overwrite:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{destination} already exists. Replace it?")
+
+        options = GalleryOptions(
+            output_path=str(destination),
+            selected_people=request.selected_people,
+            include_thumbnails=bool(request.include_thumbnails),
+            password=request.password or "",
+            title=request.title or "FaceSort Gallery",
+            overwrite=True,   # the 409 above already got consent
+        )
+        scan_root = Path(session.config.get("input_folder", ".")).expanduser()
+
+        if request.wait:
+            session.begin_gallery(total)
+            try:
+                result = build_gallery(
+                    options, selection, progress=session.gallery_progress,
+                    scan_root=scan_root,
+                )
+            except GalleryError as exc:
+                session.fail_gallery(str(exc))
+                raise HTTPException(status_code=400, detail=str(exc))
+            payload = result.as_dict()
+            session.finish_gallery(payload)
+            return {"ok": True, "started": False, **payload}
+
+        def run() -> None:
+            try:
+                result = build_gallery(
+                    options, selection, progress=session.gallery_progress,
+                    scan_root=scan_root,
+                )
+                session.finish_gallery(result.as_dict())
+            except GalleryError as exc:
+                logger.error("Gallery build failed: %s", exc)
+                session.fail_gallery(str(exc))
+            except Exception as exc:  # noqa: BLE001 - report, never crash
+                logger.error("Gallery build failed: %s\n%s",
+                             exc, traceback.format_exc())
+                session.fail_gallery(f"{type(exc).__name__}: {exc}")
+
+        session.begin_gallery(total)
+        threading.Thread(target=run, name="facesort-gallery",
+                         daemon=True).start()
+        return {
+            "ok": True,
+            "started": True,
+            "total": total,
+            "people": len(selection),
+        }
+
+    @app.get("/gallery_status")
+    def gallery_status() -> Dict[str, Any]:
+        """Progress and the finished report for a gallery build."""
+        with session._lock:
+            return {
+                "building": session.state == STATE_GALLERY,
+                "done": session.gallery_done,
+                "total": session.gallery_total,
+                "current": session.gallery_current,
+                "result": session.gallery_result,
+            }
 
     @app.post("/export_intersection")
     def export_intersection(request: ExportRequest) -> Dict[str, Any]:

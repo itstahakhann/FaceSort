@@ -9,6 +9,8 @@ scikit-learn
 fastapi
 uvicorn
 httpx
+# Renders the offline HTML gallery export (src/templates/gallery.html).
+jinja2
 # Legacy web UI (src/ui/app.py) — optional now that Electron is the
 # shipped desktop app; the CLI (python -m src.main) needs none of it.
 streamlit

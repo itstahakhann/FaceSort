@@ -110,6 +110,28 @@ const ui = {
   relateResults: $('relate-results'),
   heatmapBlock: $('heatmap-block'),
   heatmap: $('heatmap'),
+
+  // gallery export
+  galMode: 'all',
+  galPeople: $('gal-people'),
+  galPeopleField: $('gal-people-field'),
+  galPeopleEmpty: $('gal-people-empty'),
+  galPassword: $('gal-password'),
+  galPasswordToggle: $('gal-password-toggle'),
+  galThumbs: $('gal-thumbs'),
+  galPath: $('gal-path'),
+  galPick: $('gal-pick'),
+  galError: $('gal-error'),
+  galProgress: $('gal-progress'),
+  galProgressLabel: $('gal-progress-label'),
+  galProgressCount: $('gal-progress-count'),
+  galBar: $('gal-bar'),
+  galBuild: $('gal-build'),
+  galDone: $('gal-done'),
+  galDonePath: $('gal-done-path'),
+  galDoneStats: $('gal-done-stats'),
+  galOpen: $('gal-open'),
+  galOpenFolder: $('gal-open-folder'),
 };
 
 const state = {
@@ -134,6 +156,11 @@ const state = {
   picks: [],               // selected names
   relation: null,          // last /intersection payload
   lastExportFolder: '',
+  /** Gallery export. */
+  galPicks: new Set(),     // people selected in "only some" mode
+  galPath: '',
+  galBuilding: false,
+  galResult: null,
 };
 
 /* ====================================================== tiny helpers */
@@ -1219,6 +1246,10 @@ function basename(path) {
   return parts[parts.length - 1] || String(path);
 }
 
+function pathSeparator() {
+  return window.faceorg.platform === 'win32' ? '\\' : '/';
+}
+
 async function renderHeatmap() {
   try {
     const payload = await bridge.api.coOccurrence();
@@ -1339,6 +1370,163 @@ async function openRelate() {
   renderPickerList(-1);
   ui.pickerInput.focus();
   await renderHeatmap();
+}
+
+/* ===================================================== gallery export */
+
+function galError(message) {
+  ui.galError.textContent = message || '';
+  ui.galError.hidden = !message;
+}
+
+async function renderGalleryPeople() {
+  await loadPeople();
+  ui.galPeople.replaceChildren();
+  const anyone = state.people.length > 0;
+  ui.galPeopleEmpty.hidden = anyone;
+  ui.galPeopleField.hidden = ui.galMode !== 'people';
+
+  for (const person of state.people) {
+    const label = document.createElement('label');
+    label.className = 'person-check';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = person.name;
+    box.checked = state.galPicks.has(person.name);
+    const name = document.createElement('span');
+    name.textContent = person.name;
+    const count = document.createElement('small');
+    count.textContent = String(person.photos);
+    name.append(' ', count);
+    label.append(box, name);
+    box.addEventListener('change', () => {
+      if (box.checked) state.galPicks.add(person.name);
+      else state.galPicks.delete(person.name);
+      updateGalleryButton();
+    });
+    ui.galPeople.append(label);
+  }
+  updateGalleryButton();
+}
+
+function updateGalleryButton() {
+  const hasPath = Boolean(ui.galPath.value.trim());
+  const needsPeople = ui.galMode === 'people';
+  const enough = hasPath && (!needsPeople || state.galPicks.size > 0);
+  ui.galBuild.disabled = !enough || state.galBuilding;
+  ui.galBuild.title = !hasPath
+    ? 'Choose where to save the gallery'
+    : (needsPeople && !state.galPicks.size ? 'Pick at least one person' : '');
+}
+
+async function buildGallery() {
+  if (state.galBuilding) return;
+  const outputPath = ui.galPath.value.trim();
+  if (!outputPath) { galError('Choose where to save the gallery.'); return; }
+
+  const names = [...state.galPicks];
+  if (ui.galMode === 'people' && !names.length) {
+    galError('Pick at least one person, or switch to Everyone.');
+    return;
+  }
+
+  let overwrite = false;
+  // The engine refuses to clobber an existing gallery; ask first and retry
+  // with permission rather than failing and making the user start over.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    galError('');
+    state.galBuilding = true;
+    ui.galBuild.disabled = true;
+    ui.galDone.hidden = true;
+    ui.galProgress.hidden = false;
+    ui.galBar.style.width = '0%';
+    ui.galProgressCount.textContent = '0 / 0';
+    ui.galProgressLabel.textContent = 'Starting…';
+
+    try {
+      const started = await bridge.api.exportGallery({
+        output_path: outputPath,
+        export_mode: ui.galMode,
+        selected_people: names,
+        password: ui.galPassword.value,
+        include_thumbnails: ui.galThumbs.checked,
+        overwrite,
+      });
+
+      const finished = await watchGalleryBuild(started.total || 0);
+      if (finished.ok) {
+        showGalleryResult(finished.result);
+        return;
+      }
+      // A conflict means the folder exists: ask, then retry once.
+      if (/already exists/i.test(finished.error || '') && attempt === 0) {
+        const ok = window.confirm(
+          `${outputPath} already exists.\n\nReplace it with the new gallery?`);
+        if (ok) { overwrite = true; continue; }
+        galError('Cancelled — the existing gallery was left alone.');
+      } else {
+        galError(finished.error || 'The gallery could not be built.');
+      }
+      ui.galProgress.hidden = true;
+    } catch (error) {
+      galError(String(error.message || error));
+      ui.galProgress.hidden = true;
+    } finally {
+      state.galBuilding = false;
+      updateGalleryButton();
+    }
+    return;
+  }
+}
+
+/** Poll /gallery_status until the build finishes, updating the meter. */
+async function watchGalleryBuild(total) {
+  let done = 0;
+  let lastText = '';
+  for (;;) {
+    let status;
+    try {
+      status = await bridge.api.galleryStatus();
+    } catch (error) {
+      return { ok: false, error: String(error.message || error) };
+    }
+    if (status.current && status.current !== lastText) {
+      lastText = status.current;
+      ui.galProgressLabel.textContent = `Adding ${status.current}`;
+    }
+    done = status.done || 0;
+    const totalCount = status.total || total || 0;
+    const pct = totalCount ? Math.min(100, (done / totalCount) * 100) : 0;
+    ui.galBar.style.width = `${pct}%`;
+    ui.galProgressCount.textContent = `${done} / ${totalCount}`;
+
+    if (status.building) {
+      await new Promise((resolve) => { setTimeout(resolve, 350); });
+      continue;
+    }
+    if (status.result) return { ok: true, result: status.result };
+    return {
+      ok: false,
+      error: 'The engine stopped before the gallery finished.',
+    };
+  }
+}
+
+function showGalleryResult(result) {
+  state.galResult = result;
+  ui.galProgress.hidden = true;
+  ui.galDone.hidden = false;
+  ui.galDonePath.textContent = result.output_path;
+  const mb = (result.bytes_written || 0) / 1_048_576;
+  const bits = [
+    plural(result.total_photos, 'photo'),
+    plural((result.people || []).length, 'person'),
+    `${mb.toFixed(1)} MB`,
+  ];
+  if (result.thumbnails) bits.push(plural(result.thumbnails, 'thumbnail'));
+  if (result.missing) bits.push(`${result.missing} missing`);
+  ui.galDoneStats.textContent = bits.join(' · ');
+  toast(`Gallery built — ${bits[0]}`, 'ok', 'camera');
 }
 
 /* ============================================================== done */
@@ -1599,6 +1787,44 @@ function wire() {
     updateRelateButtons();
   });
   ui.relateExport.addEventListener('click', exportIntersection);
+
+  // gallery export
+  for (const button of document.querySelectorAll('[data-gal-mode]')) {
+    button.addEventListener('click', () => {
+      ui.galMode = button.dataset.galMode;
+      for (const other of document.querySelectorAll('[data-gal-mode]')) {
+        const active = other.dataset.galMode === ui.galMode;
+        other.classList.toggle('is-active', active);
+        other.setAttribute('aria-checked', active ? 'true' : 'false');
+      }
+      renderGalleryPeople();
+    });
+  }
+  ui.galPasswordToggle.addEventListener('click', () => {
+    const showing = ui.galPassword.type === 'text';
+    ui.galPassword.type = showing ? 'password' : 'text';
+    ui.galPasswordToggle.setAttribute('aria-label',
+      showing ? 'Show password' : 'Hide password');
+    ui.galPasswordToggle.title = ui.galPasswordToggle.getAttribute('aria-label');
+  });
+  ui.galPath.addEventListener('input', updateGalleryButton);
+  ui.galPick.addEventListener('click', async () => {
+    const folder = await bridge.pickFolder('gallery');
+    if (!folder) return;
+    // The generator wants to own a folder, so append a name to the chosen
+    // parent rather than filling the folder the user pointed at.
+    ui.galPath.value = `${folder.replace(/[\\/]+$/, '')}${pathSeparator()}FaceSort Gallery`;
+    updateGalleryButton();
+  });
+  ui.galBuild.addEventListener('click', buildGallery);
+  ui.galOpen.addEventListener('click', () => {
+    if (!state.galResult) return;
+    // shell.openPath on the HTML file itself: the OS picks the browser.
+    bridge.openPath(`${state.galResult.output_path}${pathSeparator()}index.html`);
+  });
+  ui.galOpenFolder.addEventListener('click', () => {
+    if (state.galResult) bridge.openPath(state.galResult.output_path);
+  });
 
   ui.clusterSearch.addEventListener('input', renderClusters);
   ui.linkToggle.addEventListener('click', () => setLinkMode(!state.linking));

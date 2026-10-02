@@ -1126,6 +1126,94 @@ input[type="range"]::-moz-range-thumb {
 .heat-label.row-label { justify-content: end; text-align: right; }
 .heat-corner { background: transparent; }
 
+/* -------------------------------------------- 4b · gallery export ------ */
+/* A distinct block at the foot of the finish view: same pieces, but arranged
+   for configuring a build rather than for doing one. */
+.gallery-panel {
+  margin-top: var(--s7);
+  padding-top: var(--s5);
+  border-top: 1px solid var(--rule);
+  text-align: left;
+}
+.gallery-head .kicker { margin-bottom: 2px; }
+.gallery-lede { margin-top: 5px; max-width: 56ch; }
+.gallery-panel .field { margin-top: var(--s5); }
+
+.people-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 4px;
+  max-height: 168px; overflow-y: auto;
+  padding: var(--s2);
+  background: var(--sunken);
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+}
+.person-check {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  font-size: var(--t-xs);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.person-check:hover { background: var(--surface); }
+.person-check input { accent-color: var(--accent); }
+.person-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.person-check small { color: var(--ink-4); font-variant-numeric: tabular-nums; }
+
+/* a checkbox drawn as one, so it matches the rest of the system */
+.check {
+  display: flex; align-items: flex-start; gap: var(--s3);
+  margin-top: var(--s4);
+  cursor: pointer;
+  font-size: var(--t-sm);
+}
+.check input { position: absolute; opacity: 0; width: 0; height: 0; }
+.check-box {
+  display: grid; place-items: center;
+  width: 16px; height: 16px; margin-top: 1px;
+  border: 1px solid var(--rule-firm);
+  border-radius: 4px;
+  background: var(--bg);
+  color: transparent;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease);
+}
+.check-box .icon { width: 11px; height: 11px; stroke-width: 2.6; }
+.check input:checked + .check-box {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.check input:focus-visible + .check-box {
+  outline: 2px solid var(--focus); outline-offset: 2px;
+}
+.check small { display: block; }
+
+.gallery-error {
+  margin-top: var(--s3);
+  padding: var(--s3);
+  background: var(--danger-wash);
+  border-left: 2px solid var(--danger);
+  border-radius: 0 5px 5px 0;
+}
+
+.gallery-progress { margin-top: var(--s4); }
+.gallery-actions { margin-top: var(--s5); }
+
+.gallery-done {
+  margin-top: var(--s5);
+  padding: var(--s5) 0 0;
+  border-top: 1px solid var(--rule);
+  text-align: center;
+  animation: rise var(--dur-slow) var(--ease) both;
+}
+.success-mark.small { width: 54px; margin-bottom: var(--s3); }
+.gallery-done .note { margin-top: 5px; word-break: break-all; }
+.gallery-done-actions {
+  display: flex; flex-wrap: wrap; gap: var(--s2);
+  justify-content: center; margin-top: var(--s4);
+}
+
 /* ------------------------------------------------------ 4 · done ------ */
 .success-mark { width: 68px; margin: 0 auto var(--s5); }
 .check { width: 100%; fill: none; stroke-linecap: round; stroke-linejoin: round; }

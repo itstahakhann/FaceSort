@@ -408,6 +408,7 @@ function buildMenu() {
 const FOLDER_DIALOG_TITLES = {
   output: 'Choose an output folder',
   export: 'Choose a folder for the matching photos',
+  gallery: 'Choose a folder for the gallery',
   input: 'Choose an input folder',
 };
 

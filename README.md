@@ -321,6 +321,68 @@ on its own.
 `GET /clusters` reports `eye_coverage` per group; the UI shows a note when a
 group leaned on the whole face alone, which is the hint to use the merge.
 
+## HTML gallery export
+
+Instead of (or as well as) sorting photos into folders, FaceSort can build a
+**self-contained offline gallery**: one folder containing an HTML page, a
+stylesheet, a script and the images. It opens in any browser with no server and
+no network, so it can be zipped, emailed, put on a USB stick or opened on a
+phone with no signal — and it still works in ten years.
+
+Reachable from the finish view: **Build a photo gallery website**.
+
+### What it contains
+
+- A landing page of people, each a card with a cover thumbnail and photo count.
+- Clicking a person opens their grid, with thumbnails for speed.
+- A full-screen lightbox: click to open, **←/→** to move between photos, **Esc**
+  to close, swipe on a phone. The next and previous images are preloaded so the
+  arrows feel instant.
+- A name filter, a dark/light toggle (dark by default, following the OS on
+  first visit), and deep links — `index.html#Alex` opens that person's grid.
+- Animated card entrances, hover lift, and lightbox transitions, all disabled
+  under `prefers-reduced-motion`.
+
+### Password protection is client-side only
+
+If you set a password, the page is gated behind a SHA-256 check in the browser.
+**This is not encryption.** The digest is embedded in the HTML, so anyone who
+opens the source can read it, and a weak password is recoverable offline with a
+dictionary. It stops a family member or a guest from casually browsing; it does
+not protect the photos from anyone who means it — and since a browser must be
+able to read a JPEG to display it, anyone who can open the page can open the
+image files directly.
+
+If you need real protection, keep the photos somewhere the browser cannot reach
+and serve the gallery through a server that checks the password.
+
+### Thumbnails and sizing
+
+Thumbnails are capped on their **long** edge at 300 px (not the width — a
+portrait photo scaled to 300 px wide would end up 400 px tall), saved as
+progressive JPEG at quality 80. Full images are capped at 2400 px on the long
+edge: uncapped phone photos make a gallery far too heavy to browse.
+
+### Robustness
+
+Person names are sanitised into folder names — path separators, quotes and
+Windows-illegal characters replaced, reserved device names (`CON`, `NUL`,
+`COM1`…) escaped, trailing dots trimmed, and colliding names suffixed
+`John (2)`. A corrupt or truncated photo is **skipped and reported**, never
+fatal: losing one photo out of ten thousand beats losing the gallery. Missing
+files are reported the same way.
+
+The build runs on a worker thread and reports per-file progress through
+`/status` (and `/gallery_status`), so a large library shows movement instead of
+freezing. Re-running over an existing gallery folder is refused with a 409
+until the user confirms, and even then a repeat export never overwrites a
+photo file.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/export_gallery` | Build the gallery. `{output_path, export_mode, selected_people, password, include_thumbnails, title, overwrite, wait}`. `wait: true` blocks until done; the UI uses the background path for progress |
+| `GET` | `/gallery_status` | `{building, done, total, current, result}` |
+
 ## Relationships — "which photos have them together?"
 
 Pick two or more people and FaceSort shows only the photos where **every** one
@@ -684,6 +746,8 @@ gender-age graphs are never called, so they are left out.
 | `GET` | `/intersection?names=A,B` | Photos containing **every** named person. See [Relationships](#relationships--which-photos-have-them-together) |
 | `GET` | `/co_occurrence_matrix` | Pairwise shared-photo counts, for the heatmap |
 | `POST` | `/export_intersection` | Copies the matching photos into `{output_folder, names}`. Copies rather than moves, and never overwrites an existing file |
+| `POST` | `/export_gallery` | Builds the offline HTML gallery (see [HTML gallery export](#html-gallery-export)) |
+| `GET` | `/gallery_status` | Progress and the finished report for a gallery build |
 | `POST` | `/organize` | Copies/moves every photo into `output_folder/<person>/` **on a worker thread** — returns `{"started": true, "total": n}`; follow `/status` for per-file progress and read the report from `status.results` |
 | `GET` | `/thumb?name=` | Small (420 px) JPEG of one photo **inside the scanned folder** — the live scan preview. Scoped by design: only a *basename* is accepted and resolved inside the input folder, so the endpoint can never be used to read arbitrary files |
 | `GET` | `/photo?name=` | The same photo at 1600 px, for the review lightbox. Identical scoping; renders are memoised on `(path, mtime, size)` in a 64-entry cache |
@@ -791,6 +855,7 @@ python tests/test_pipeline.py    # image loader, detector, embedder
 python tests/test_clusterer.py   # clustering, de-duplication, config mapping
 python tests/test_age_invariance.py  # periocular landmarks, fused distance, age pairing
 python tests/test_relationships.py   # occurrence table, intersection, co-occurrence, scale
+python tests/test_gallery.py         # HTML gallery: sanitising, thumbnails, offline, gate
 python tests/test_organizer.py   # folders, copy/move, name collisions
 python tests/test_names_db.py    # persistent name DB, matching, blending
 python tests/test_preview.py     # thumbnail montage, temp files, viewer
@@ -820,6 +885,7 @@ FaceSort/
 │   ├── eye_embedder.py  # periocular landmarks & age-stable fingerprint
 │   ├── fusion.py        # age-invariant fused distance (pure maths)
 │   ├── clusterer.py     # clustering of embeddings
+│   ├── gallery.py       # offline HTML gallery export
 │   ├── organizer.py     # copies/moves photos into named folders
 │   ├── names_db.py      # persistent name database, SQLite (M3)
 │   └── ui/
@@ -847,6 +913,8 @@ FaceSort/
 │   ├── test_clusterer.py
 │   ├── test_age_invariance.py
 │   ├── test_relationships.py
+│   ├── test_gallery.py
+│   ├── templates/       # gallery.html + its CSS/JS (shipped in the bundle)
 │   ├── test_organizer.py
 │   ├── test_names_db.py
 │   ├── test_preview.py

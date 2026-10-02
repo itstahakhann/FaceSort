@@ -67,6 +67,16 @@ MODEL_STAGE = ROOT / "python_build" / "models" / "buffalo_l"
 # --------------------------------------------------------------------------
 datas = [(str(ROOT / "config.yaml"), ".")]
 
+# The HTML gallery template and its assets must ship inside the frozen engine:
+# build_gallery() renders gallery.html at export time, so the files have to be
+# readable from sys._MEIPASS rather than from beside the executable.
+templates = ROOT / "src" / "templates"
+for asset in ("gallery.html", "gallery.css", "gallery.js"):
+    asset_path = templates / asset
+    if not asset_path.is_file():
+        raise SystemExit(f"Missing gallery asset: {asset_path}")
+    datas.append((str(asset_path), "templates"))
+
 if EMBED_MODELS:
     if not MODEL_STAGE.is_dir():
         raise SystemExit(
@@ -90,6 +100,9 @@ datas += collect_data_files("PIL", include_py_files=False)
 
 hiddenimports = [
     "uvicorn.logging",
+    # Jinja2 renders the HTML gallery; without this the frozen build cannot
+    # resolve the template environment at import time.
+    "jinja2",
     "uvicorn.loops.auto",
     "uvicorn.loops.asyncio",
     "uvicorn.protocols.http.auto",
