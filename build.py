@@ -5,6 +5,7 @@ Two artifacts, one command::
     python build.py models     # stage the ONNX weights for packaging
     python build.py backend    # PyInstaller -> dist/backend/backend.exe
     python build.py electron   # electron-builder -> electron/release/*.exe
+python build.py release    # copy the installers to release/ with checksums
     python build.py all        # everything above, in order
     python build.py clean      # remove build/ dist/ electron/release/
 
@@ -29,10 +30,12 @@ ONNX files that are already on disk.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Sequence
 
@@ -227,6 +230,141 @@ def build_electron(installer: bool = True, skip_install: bool = False) -> int:
     return code
 
 
+def stage_release() -> int:
+    """Collect the built artifacts into ``release/`` at the repo root.
+
+    electron-builder writes to ``electron/release/``; this gathers the two
+    things a person actually wants to test-install — the NSIS installer and the
+    portable exe — plus checksums and a note, into one obvious folder.
+
+    It copies rather than moves, so ``electron/release/`` stays as
+    electron-builder expects and a rebuild does not lose anything.
+    """
+    print("=" * 70)
+    print("STAGE  release/")
+    print("=" * 70)
+
+    source = ELECTRON_DIR / "release"
+    if not source.is_dir():
+        print(f"Nothing to collect: {source} does not exist.\n"
+              "Run 'python build.py electron' first.", file=sys.stderr)
+        return 2
+
+    wanted = sorted(source.glob("*.exe"))
+    if not wanted:
+        print(f"No .exe artifacts in {source}.\n"
+              "Run 'python build.py electron' first.", file=sys.stderr)
+        return 2
+
+    target = ROOT / "release"
+    target.mkdir(parents=True, exist_ok=True)
+    copied: List[tuple] = []
+    for artifact in wanted:
+        # Skip electron-builder's own scratch output: it is an unpacked tree,
+        # not something you install.
+        if artifact.name.endswith(".__uninstaller.exe"):
+            continue
+        destination = target / artifact.name
+        print(f"  copying {artifact.name} ({artifact.stat().st_size / 1e6:.0f} MB)")
+        shutil.copy2(artifact, destination)
+        copied.append(destination)
+
+    if not copied:
+        print("Only the uninstaller stub was found; the build may have failed.",
+              file=sys.stderr)
+        return 2
+
+    # Checksums, so a downloaded copy can be verified against the original.
+    lines = []
+    for path in copied:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        lines.append(f"{digest}  {path.name}")
+        print(f"  sha256 {path.name}: {digest[:16]}...")
+    (target / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n",
+                                           encoding="utf-8")
+
+    (target / "README.txt").write_text(_release_readme(copied), encoding="utf-8")
+
+    print()
+    print(f"Release staged in {target}")
+    for path in copied:
+        print(f"  {path.name:<38} {path.stat().st_size / 1e6:>7.0f} MB")
+    print("  SHA256SUMS.txt")
+    print("  README.txt")
+    return 0
+
+
+def _release_readme(artifacts: List[Path]) -> str:
+    generated = datetime.now().strftime("%Y-%m-%d %H:%M")
+    names = "\n".join(f"  - {path.name}  ({path.stat().st_size / 1e6:.0f} MB)"
+                      for path in artifacts)
+    return f"""FaceSort - release build
+Generated {generated}
+{'=' * 60}
+
+WHAT IS HERE
+{names}
+  - SHA256SUMS.txt   checksums, to confirm a copy is intact
+  - README.txt       this file
+
+HOW TO CHECK THAT INSTALLATION WORKS
+
+1. The installer  (FaceSort-Setup-*.exe)
+   Double-click it and click through. It installs per-user, so no admin
+   rights are needed and nothing goes to Program Files.
+   After it finishes, launch FaceSort from the Start menu.
+
+   EXPECTED: a blue progress line in the terminal window it opened, ending
+   with something like:
+       [bridge] engine is ready
+
+   IMPORTANT - these builds are NOT code-signed. Windows SmartScreen will
+   show "Windows protected your PC" because it cannot verify an unknown
+   publisher. Click "More info" then "Run anyway". This is expected for any
+   self-built release, not a sign that the download is bad.
+
+   Verify the copy is intact:
+       certutil -hashfile "FaceSort-Setup-1.0.0.exe" SHA256
+   and compare with the same line in SHA256SUMS.txt.
+
+2. The portable exe  (FaceSort-Portable-*.exe)
+   Copy it anywhere and double-click it. No install, no registry, no
+   uninstaller - delete the file when you are done.
+   Use this to confirm the app itself works before trusting the installer.
+
+3. Where things go
+   Settings   %APPDATA%\\FaceSort          (Chromium profile, created on run)
+   Names DB   %LOCALAPPDATA%\\FaceSort      (remembered people)
+   Photos     wherever you point it - the app never moves your originals
+               unless you choose Move instead of Copy.
+
+4. Uninstalling
+   Settings > Apps > Installed apps > FaceSort > Uninstall.
+   The portable exe needs no uninstalling. To forget every remembered name,
+   delete facesort_names.db from %LOCALAPPDATA%\\FaceSort.
+
+IF SOMETHING GOES WRONG
+
+  "The engine never became ready"
+      The bundled Python engine failed to start. Re-run the app from a
+      terminal to see its output, and check that antivirus has not quarantined
+      resources\\_internal (a 500 MB folder of ONNX models looks unusual).
+
+  "Face model is not installed"
+      The ONNX weights did not unpack. Re-extract, or build from source with
+      'python build.py all'.
+
+  The app opens but the window is blank
+      Press Ctrl+Shift+I for developer tools and read the console. A CSP or
+      script error would appear there.
+
+BUILDING THIS YOURSELF
+
+    python build.py all          # models -> engine -> installer
+    python build.py release      # collect the artifacts above
+"""
+
+
 def clean_everything() -> int:
     """Remove all build output (keeps node_modules, which is a big re-download)."""
     targets = [PYI_ROOT, ROOT / "build", ROOT / "dist", ELECTRON_DIR / "release",
@@ -254,7 +392,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         epilog=__doc__,
     )
     parser.add_argument("target", choices=["models", "backend", "electron",
-                                           "all", "clean"],
+                                           "release", "all", "clean"],
                         help="which build step to run")
     parser.add_argument("--onefile", action="store_true",
                         help="backend: single self-extracting exe (slow start)")
@@ -278,6 +416,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.target == "electron":
         return build_electron(installer=not args.directory,
                               skip_install=args.skip_install)
+    if args.target == "release":
+        return stage_release()
     if args.target == "clean":
         return clean_everything()
 

@@ -21,6 +21,9 @@ __pycache__/
 /dist/
 # electron-builder installers + win-unpacked
 /electron/release/
+# staged by 'python build.py release': the installers are ~750 MB of build
+# output, not source
+/release/
 *.spec.bak
 
 # ---- Node / Electron ----

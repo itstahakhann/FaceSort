@@ -179,8 +179,13 @@ function announce(text) {
 }
 
 /** `plural(1, 'photo')` -> "1 photo", `plural(3, 'photo')` -> "3 photos". */
-function plural(count, word) {
-  return `${count} ${word}${count === 1 ? '' : 's'}`;
+/**
+ * "3 photos", "1 photo" — and "3 people", because English is not a machine.
+ * Pass the irregular plural as the second argument where the +s rule lies.
+ */
+function plural(count, word, irregularPlural) {
+  const noun = count === 1 ? word : (irregularPlural || `${word}s`);
+  return `${count} ${noun}`;
 }
 
 function toast(message, kind = '', iconName = null) {
@@ -1520,7 +1525,7 @@ function showGalleryResult(result) {
   const mb = (result.bytes_written || 0) / 1_048_576;
   const bits = [
     plural(result.total_photos, 'photo'),
-    plural((result.people || []).length, 'person'),
+    plural((result.people || []).length, 'person', 'people'),
     `${mb.toFixed(1)} MB`,
   ];
   if (result.thumbnails) bits.push(plural(result.thumbnails, 'thumbnail'));
