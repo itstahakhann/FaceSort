@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy"
@@ -9,8 +9,8 @@
 </head>
 <body>
   <!-- ===================================================== icon sprite ====
-       Inline SVG instead of an icon webfont: the app is offline and the
-       CSP forbids remote stylesheets, so icons are bundled as symbols. -->
+       Inline SVG rather than an icon webfont: the app is offline and the
+       CSP forbids remote stylesheets, so icons ship as local symbols. -->
   <svg class="sprite" aria-hidden="true" focusable="false">
     <symbol id="i-logo" viewBox="0 0 24 24">
       <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -61,7 +61,7 @@
       <path d="M15 6.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h.5" />
     </symbol>
     <symbol id="i-move" viewBox="0 0 24 24">
-      <path d="M12 3v18M3 12h18M12 3 9.5 5.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M12 3v18M3 12h18M12 3 9.5 5.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l2.5 2.5" stroke-linecap="round" stroke-linejoin="round" />
     </symbol>
     <symbol id="i-refresh" viewBox="0 0 24 24">
       <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -83,7 +83,6 @@
     <symbol id="i-party" viewBox="0 0 24 24">
       <path d="M4 20 15.5 8.5M16.8 7.2 20 10.4M6.5 4.5l1.6 3.4 3.4 1.6-3.4 1.6-1.6 3.4-1.6-3.4L1.5 9.5l3.4-1.6z" stroke-linecap="round" stroke-linejoin="round" />
     </symbol>
-    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round" /></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24">
       <path d="M4 8.5h3l1.4-2h7.2l1.4 2h3a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 20 18.5H4A1.5 1.5 0 0 1 2.5 17v-7A1.5 1.5 0 0 1 4 8.5z"/>
       <circle cx="12" cy="13" r="3.2" />
@@ -91,13 +90,6 @@
     <symbol id="i-eye" viewBox="0 0 24 24">
       <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" stroke-linejoin="round"/>
       <circle cx="12" cy="12" r="3" />
-    </symbol>
-    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
-    <symbol id="i-users-pair" viewBox="0 0 24 24">
-      <circle cx="8" cy="8.5" r="3" />
-      <path d="M2.5 19c.7-3.2 3-4.8 5.5-4.8s4.8 1.6 5.5 4.8z" />
-      <circle cx="16.5" cy="9.5" r="2.4" />
-      <path d="M15 14.4c2.6 0 4.6 1.4 5.2 4.6h-3.1" />
     </symbol>
     <symbol id="i-link" viewBox="0 0 24 24">
       <path d="M9.5 14.5 14.5 9.5" stroke-linecap="round" />
@@ -108,87 +100,105 @@
 
   <!-- ========================================================= shell ==== -->
   <div class="app" id="app">
-    <header class="bar">
-      <button class="icon-btn only-narrow" id="drawer-toggle" type="button"
-              aria-label="Show settings" aria-expanded="false">
-        <svg class="icon"><use href="#i-menu" /></svg>
-      </button>
-
-      <div class="identity">
-        <span class="mark" aria-hidden="true"><svg class="icon"><use href="#i-logo" /></svg></span>
-        <span class="identity-text">
-          <strong>FaceSort</strong>
-          <span class="micro">Offline · local only</span>
-        </span>
+    <header class="topbar">
+      <div class="brand">
+        <svg class="icon" aria-hidden="true"><use href="#i-logo" /></svg>
+        FaceSort
       </div>
 
-      <!-- progress reads as one continuous rule, not four separate chips -->
-      <nav class="progress" aria-label="Progress">
-        <div class="progress-rail" aria-hidden="true"><span class="progress-fill" id="progress-fill"></span></div>
-        <ol class="progress-steps">
-          <li class="pstep" data-step="configure"><i>1</i><span>Configure</span></li>
-          <li class="pstep" data-step="scanning"><i>2</i><span>Scan</span></li>
-          <li class="pstep" data-step="review"><i>3</i><span>Review</span></li>
-          <li class="pstep" data-step="done"><i>4</i><span>Finish</span></li>
-        </ol>
+      <!-- Three sections, not four steps. The organise pipeline is one
+           section with its own internal stages; the other two are things you
+           might want that are not part of sorting at all. -->
+      <nav class="nav" aria-label="Sections">
+        <button type="button" data-nav="configure" aria-current="true">Organise</button>
+        <button type="button" data-nav="relate" id="goto-relate">People together</button>
+        <button type="button" data-nav="share">Share gallery</button>
       </nav>
 
       <div class="bar-right">
-        <button id="goto-relate" class="btn quiet small" type="button"
-                title="Find photos of specific people together">
-          <svg class="icon"><use href="#i-search" /></svg>
-          <span>Find together</span>
-        </button>
         <span class="engine" id="engine-pill" data-state="connecting">
           <i aria-hidden="true"></i><span id="engine-label">connecting</span>
         </span>
-        <button class="icon-btn" id="theme-toggle" type="button"
-                aria-label="Switch theme" title="Switch theme">
-          <svg class="icon theme-icon-dark"><use href="#i-sun" /></svg>
-          <svg class="icon theme-icon-light"><use href="#i-moon" /></svg>
+        <button class="theme-btn" id="theme-toggle" type="button" aria-label="Switch theme">
+          Dark mode
         </button>
       </div>
     </header>
 
-    <div class="body">
-      <!-- ------------------------------------------------- rail --- -->
-      <aside class="rail" id="sidebar">
-        <!-- Settings are hairline-separated groups, not stacked boxes. -->
-        <section class="group">
-          <h2 class="eyebrow">Input &amp; output</h2>
+    <main class="stage" id="stage" tabindex="-1">
+
+      <!-- ============================================ 1 · ORGANISE ===== -->
+
+      <!-- the opening screen: one promise, one action -->
+      <section class="view is-active" data-view="configure" aria-label="Organise" hidden>
+        <h1 class="display">Sort every photo by who's in it.</h1>
+        <p class="lede">
+          FaceSort finds the people in your photo library and puts each person's
+          pictures in their own folder. Everything stays on this computer, so no
+          face and no name is ever uploaded anywhere.
+        </p>
+
+        <div class="drop" id="dropzone" tabindex="0" role="button"
+             aria-label="Choose or drop the folder with your photos">
+          <div class="cta">
+            <button class="btn" id="scan" type="button">
+              <span id="scan-label">Choose photo folder</span>
+            </button>
+            <span class="sub">
+              or drop a folder here. Takes about a minute per 1,000 photos.
+            </span>
+          </div>
+        </div>
+        <p class="note" id="dropzone-chosen"></p>
+
+        <p class="out">
+          <span>Sorted folders will be saved to</span>
+          <b id="out-path">—</b>
+          <button class="link" id="pick-output" type="button">Change</button>
+        </p>
+
+        <p class="set">
+          Your originals are copied, never moved or changed.
+          <button class="link" id="settings-toggle" type="button"
+                  aria-expanded="false" aria-controls="settings">Change settings</button>
+        </p>
+
+        <div class="set" id="settings" hidden>
           <div class="field">
             <label class="label" for="input-folder">Photo folder</label>
-            <div class="row">
+            <div class="field-row">
               <input id="input-folder" type="text" spellcheck="false"
                      placeholder="C:\Pictures\family" autocomplete="off" />
-              <button class="icon-btn ghost" id="pick-input" type="button"
+              <button class="icon-btn" id="pick-input" type="button"
                       aria-label="Choose input folder" title="Choose input folder">
                 <svg class="icon"><use href="#i-folder-open" /></svg>
               </button>
             </div>
           </div>
-          <div class="field">
-            <label class="label" for="output-folder">Destination</label>
-            <div class="row">
-              <input id="output-folder" type="text" spellcheck="false"
-                     placeholder="C:\Pictures\sorted" autocomplete="off" />
-              <button class="icon-btn ghost" id="pick-output" type="button"
-                      aria-label="Choose output folder" title="Choose output folder">
-                <svg class="icon"><use href="#i-folder-open" /></svg>
-              </button>
-            </div>
-          </div>
-        </section>
 
-        <section class="group">
-          <h2 class="eyebrow">Grouping</h2>
+          <!-- The destination also appears above, as plain text next to
+               "Change". This is the editable copy. -->
+          <div class="field">
+            <label class="label" for="output-folder">Destination folder</label>
+            <input id="output-folder" type="text" spellcheck="false"
+                   placeholder="C:\Pictures\sorted" autocomplete="off" />
+            <p class="note">Sorted folders are created inside it. Your originals are never touched.</p>
+          </div>
+
+          <div class="opts">
+            <span class="micro">When sorting</span>
+            <label><input type="radio" name="mode" data-mode="copy" checked /> Copy photos</label>
+            <label><input type="radio" name="mode" data-mode="move" /> Move photos</label>
+          </div>
+
           <div class="field">
             <label class="label" for="tolerance">
-              Tolerance <output id="tolerance-value" class="tnum">0.50</output>
+              Match strictness <output id="tolerance-value" class="tnum">0.50</output>
             </label>
             <input id="tolerance" type="range" min="0.20" max="1.00" step="0.05" value="0.50" />
             <p class="note">Higher groups more faces together.</p>
           </div>
+
           <div class="field two-up">
             <div>
               <label class="label" for="min-faces">Min faces</label>
@@ -200,32 +210,290 @@
               <p class="note">0 = auto</p>
             </div>
           </div>
-        </section>
+        </div>
 
-        <section class="group">
-          <h2 class="eyebrow">When sorting</h2>
-          <div class="segmented" role="radiogroup" aria-labelledby="mode-label">
-            <span class="sr-only" id="mode-label">Copy or move originals</span>
-            <button type="button" class="seg is-active" data-mode="copy"
-                    role="radio" aria-checked="true">
-              <svg class="icon"><use href="#i-copy" /></svg> Copy
-            </button>
-            <button type="button" class="seg" data-mode="move"
-                    role="radio" aria-checked="false">
-              <svg class="icon"><use href="#i-move" /></svg> Move
-            </button>
+        <div class="facts">
+          <div><b>Finds faces</b>Even in group shots and old photos.</div>
+          <div><b>You name them</b>One person at a time, a few seconds each.</div>
+          <div><b>Then you get folders</b>One per person, ready to open.</div>
+        </div>
+      </section>
+
+      <!-- scanning -->
+      <section class="view" data-view="scanning" aria-label="Scanning" hidden>
+        <ol class="steps">
+          <li class="pstep" data-step="configure">Choose</li>
+          <li class="pstep" data-step="scanning">Look</li>
+          <li class="pstep" data-step="review">Name</li>
+          <li class="pstep" data-step="done">Sort</li>
+        </ol>
+
+        <h2 class="title stage-title">Looking for faces</h2>
+        <p class="num tnum" id="scan-percent">0%</p>
+
+        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+             aria-valuenow="0" id="scan-bar-wrap">
+          <i id="scan-bar"></i>
+        </div>
+
+        <p class="scan-status">
+          <span class="beat" aria-hidden="true"></span>
+          <span id="scan-text">Starting up…</span>
+        </p>
+
+        <!-- a filmstrip of what has just been read: proof of work, and it
+             makes a long scan feel like it is moving -->
+        <div class="strip" id="scan-strip" aria-hidden="true"></div>
+
+        <figure class="preview frame" id="scan-frame">
+          <img id="preview-img" alt="" decoding="async" />
+          <span id="preview-name">—</span>
+        </figure>
+
+        <ul class="stat-strip" id="scan-stats"></ul>
+      </section>
+
+      <!-- review -->
+      <section class="view" data-view="review" aria-label="Name each group" hidden>
+        <ol class="steps">
+          <li class="pstep" data-step="configure">Choose</li>
+          <li class="pstep" data-step="scanning">Look</li>
+          <li class="pstep" data-step="review">Name</li>
+          <li class="pstep" data-step="done">Sort</li>
+        </ol>
+
+        <h2 class="title stage-title">Who is this?</h2>
+        <p class="lede">Name each group. Skipped groups go into <b>_unknown</b>, so nothing is ever lost.</p>
+
+        <div class="review-bar">
+          <div class="filter field">
+            <label class="sr-only" for="cluster-search">Filter groups by name</label>
+            <input id="cluster-search" type="search" placeholder="Filter by name" />
           </div>
-        </section>
 
-        <!-- The one action that belongs to this view. -->
-        <div class="rail-cta">
-          <button id="scan" class="btn primary" type="button">
-            <svg class="icon"><use href="#i-search" /></svg>
-            <span id="scan-label">Scan photos</span>
+          <!-- Manual age bridge: assert that two groups are one person. -->
+          <button class="btn ghost" id="link-toggle" type="button" aria-pressed="false">
+            <svg class="icon"><use href="#i-link" /></svg>
+            <span>Same person?</span>
+          </button>
+
+          <label class="switch">
+            <input type="checkbox" id="auto-celebrate" checked />
+            <span class="switch-track" aria-hidden="true"></span>
+            <span class="micro">Confetti</span>
+          </label>
+
+          <span class="spacer"></span>
+
+          <button class="btn sm" id="organize" type="button" disabled>
+            <span id="organize-label">Sort into folders</span>
           </button>
         </div>
 
-        <section class="group" id="mini-progress" hidden>
+        <!-- merge tray: only in link mode -->
+        <div class="merge-tray" id="merge-tray" hidden>
+          <div class="merge-slots">
+            <div class="merge-slot" id="merge-slot-a" data-slot="a">
+              <span class="eyebrow">First group</span>
+              <span class="merge-slot-empty">Select a group</span>
+            </div>
+            <svg class="icon merge-link" aria-hidden="true"><use href="#i-link" /></svg>
+            <div class="merge-slot" id="merge-slot-b" data-slot="b">
+              <span class="eyebrow">Second group</span>
+              <span class="merge-slot-empty">Select a group</span>
+            </div>
+          </div>
+          <div class="merge-bar">
+            <div class="field">
+              <label class="label" for="merge-name">Who is it?</label>
+              <input id="merge-name" type="text" autocomplete="off"
+                     placeholder="Leave blank to link for this run only" />
+            </div>
+            <button class="btn ghost" id="merge-cancel" type="button">Cancel</button>
+            <button class="btn sm" id="merge-confirm" type="button" disabled>
+              <span>Link groups</span>
+            </button>
+          </div>
+          <p class="note">
+            Use this when one person appears in two groups — usually a childhood
+            photo and an adult one. Naming them here also remembers the link, so
+            future scans group them on their own.
+          </p>
+        </div>
+
+        <div class="clusters" id="clusters"></div>
+      </section>
+
+      <!-- done -->
+      <section class="view" data-view="done" aria-label="Finished" hidden>
+        <ol class="steps">
+          <li class="pstep" data-step="configure">Choose</li>
+          <li class="pstep" data-step="scanning">Look</li>
+          <li class="pstep" data-step="review">Name</li>
+          <li class="pstep" data-step="done">Sort</li>
+        </ol>
+
+        <!-- While sorting, the count is the headline. The same shape as the
+             scan screen, because it is the same question: how far along. -->
+        <div class="sorting-readout" id="sorting-readout" hidden>
+          <p class="num tnum" id="sort-num">0 / 0</p>
+          <div class="bar"><i id="sort-bar"></i></div>
+          <p class="sub" id="sort-status">Creating folders\u2026</p>
+        </div>
+
+        <div class="sortzone" id="sortzone" hidden>
+          <div class="sort-src" id="sort-src"></div>
+          <div class="sort-fold" id="sort-fold"></div>
+        </div>
+
+        <div class="tally-mark" aria-hidden="true">
+          <svg viewBox="0 0 72 72"><path class="tick" d="M14 37.5 28 51 58 20" /></svg>
+        </div>
+
+        <h1 class="display" id="done-title">All sorted</h1>
+        <p class="lede" id="done-sub">Your photos are in their new folders.</p>
+
+        <dl class="facts-list" id="done-stats"></dl>
+        <ul class="ledger" id="folder-list"></ul>
+
+        <div class="cta">
+          <button class="btn" id="done-open" type="button">Open output folder</button>
+          <button class="link" id="done-again" type="button">Scan another folder</button>
+          <button class="link" id="done-celebrate" type="button">Celebrate</button>
+        </div>
+      </section>
+
+      <!-- ================================== 2 · PEOPLE TOGETHER ========== -->
+      <section class="view" data-view="relate" aria-label="People together" hidden>
+        <h1 class="display small">Which photos have them <em>together</em>?</h1>
+        <p class="lede">
+          Pick two or more people to see only the photos where every one of them
+          appears. Pick a single person to see all of their photos.
+        </p>
+
+        <!-- tag input: type to search, Enter or click to add -->
+        <div class="picker field" id="picker">
+          <div class="picker-tags" id="picker-tags"></div>
+          <input id="picker-input" type="text" autocomplete="off"
+                 placeholder="Search people…" role="combobox"
+                 aria-expanded="false" aria-controls="picker-list"
+                 aria-autocomplete="list" />
+          <ul class="picker-list" id="picker-list" role="listbox" hidden></ul>
+        </div>
+
+        <div class="relate-actions">
+          <button class="btn sm" id="relate-find" type="button" disabled>
+            <span id="relate-find-label">Find photos</span>
+          </button>
+          <button class="link" id="relate-clear" type="button">Clear</button>
+          <button class="btn ghost" id="relate-export" type="button" disabled>
+            <svg class="icon"><use href="#i-copy" /></svg>
+            <span>Export these photos</span>
+          </button>
+        </div>
+
+        <p class="relate-error" id="relate-error" hidden></p>
+
+        <div class="relate-summary" id="relate-summary" hidden>
+          <div class="relate-count">
+            <p class="tnum" id="relate-found">0</p>
+            <p class="micro" id="relate-wording">matching photos</p>
+          </div>
+          <svg class="venn" id="venn" viewBox="0 0 320 180"
+               role="img" aria-label="Overlap between the selected people"></svg>
+        </div>
+
+        <div class="results" id="relate-results" hidden></div>
+
+        <section class="heatmap-block" id="heatmap-block" hidden>
+          <div class="heatmap-head">
+            <h2 class="title">Who appears together</h2>
+            <p class="note">
+              Darker means more shared photos. Click a pair to search for those two.
+            </p>
+          </div>
+          <div class="heatmap" id="heatmap"></div>
+        </section>
+      </section>
+
+      <!-- ================================== 3 · SHARE GALLERY ============ -->
+      <section class="view" data-view="share" aria-label="Share gallery" hidden>
+        <h1 class="display small">Make a gallery you can share.</h1>
+        <p class="lede gallery-intro">
+          One folder you can send to family. It opens in any browser, even with
+          no internet, and has a full-screen viewer.
+        </p>
+
+        <div class="field">
+          <span class="label">Include</span>
+          <div class="opts">
+            <label><input type="radio" name="gal" data-gal-mode="all" checked /> Everyone</label>
+            <label><input type="radio" name="gal" data-gal-mode="people" /> Choose people</label>
+          </div>
+        </div>
+
+        <div class="field" id="gal-people-field" hidden>
+          <span class="label">People</span>
+          <div class="people-picker" id="gal-people"></div>
+          <p class="note" id="gal-people-empty">Nobody has been named yet.</p>
+        </div>
+
+        <div class="field">
+          <label class="label" for="gal-password">Password (optional)</label>
+          <div class="field-row">
+            <input id="gal-password" type="password" autocomplete="new-password"
+                   placeholder="Leave empty for no password" />
+            <button class="icon-btn" id="gal-password-toggle" type="button"
+                    aria-label="Show password" title="Show password">
+              <svg class="icon"><use href="#i-eye" /></svg>
+            </button>
+          </div>
+          <p class="note">
+            A simple gate, not encryption — the photos sit in the folder itself,
+            so anyone technical can open them directly.
+          </p>
+        </div>
+
+        <label class="check check-gap">
+          <input type="checkbox" id="gal-thumbs" checked />
+          <span>Make smaller thumbnails<small>Recommended — much faster to browse</small></span>
+        </label>
+
+        <p class="out">
+          <span>Gallery will be saved to</span>
+          <input id="gal-path" class="path-input" type="text" spellcheck="false"
+                 placeholder="Choose a folder" autocomplete="off" />
+          <button class="link" id="gal-pick" type="button">Change</button>
+        </p>
+
+        <p class="relate-error gallery-error" id="gal-error" hidden></p>
+
+        <div class="gallery-progress" id="gal-progress" hidden>
+          <div class="meter-head">
+            <span id="gal-progress-label">Building…</span>
+            <span class="tnum" id="gal-progress-count">0 / 0</span>
+          </div>
+          <div class="meter-rail"><span class="meter-fill accent" id="gal-bar"></span></div>
+        </div>
+
+        <div class="cta">
+          <button class="btn" id="gal-build" type="button">Create gallery</button>
+        </div>
+
+        <div class="gallery-done" id="gal-done" hidden>
+          <h2 class="title" id="gal-done-title">Gallery ready.</h2>
+          <p class="out"><span>Saved in</span><b id="gal-done-path"></b></p>
+          <p class="note" id="gal-done-stats"></p>
+          <div class="cta cta-tight">
+            <button class="btn sm" id="gal-open" type="button">Open in browser</button>
+            <button class="link" id="gal-open-folder" type="button">Show folder</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================================================== footer ======= -->
+      <footer class="foot">
+        <section id="mini-progress" hidden>
           <div class="meter">
             <div class="meter-head">
               <span id="mini-label">Working…</span>
@@ -235,347 +503,23 @@
           </div>
         </section>
 
-        <section class="group" id="summary-panel" hidden>
+        <section id="summary-panel" hidden>
           <h2 class="eyebrow">Last run</h2>
-          <dl class="facts" id="summary"></dl>
+          <dl class="facts-list" id="summary"></dl>
         </section>
 
-        <section class="group" id="log-panel" hidden>
+        <section id="log-panel" hidden>
           <h2 class="eyebrow">
             Engine log
-            <button id="log-toggle" class="icon-btn ghost small" type="button"
+            <button id="log-toggle" class="icon-btn small" type="button"
                     aria-label="Hide engine log" title="Hide engine log">
               <svg class="icon"><use href="#i-chevron-up" /></svg>
             </button>
           </h2>
           <pre id="log" class="log" hidden></pre>
         </section>
-      </aside>
-
-      <!-- ---------------------------------------------------- stage --- -->
-      <main class="stage" id="stage" tabindex="-1">
-        <!-- RELATIONSHIPS · find photos of these people together ----- -->
-        <section class="view" data-view="relate" aria-label="Find people together" hidden>
-          <div class="sheet relate-sheet">
-            <button class="back-link" id="relate-back" type="button">
-              <svg class="icon"><use href="#i-chevron-right" /></svg> Back
-            </button>
-            <p class="kicker">Relationships</p>
-            <h1 class="display">Which photos have them <em>together</em>?</h1>
-            <p class="lede">
-              Pick two or more people to see only the photos where every one of
-              them appears. Choose a single person to see all their photos.
-            </p>
-
-            <!-- tag input: type to search, Enter or click to add -->
-            <div class="picker" id="picker">
-              <div class="picker-tags" id="picker-tags"></div>
-              <input id="picker-input" type="text" autocomplete="off"
-                     placeholder="Search people…" role="combobox"
-                     aria-expanded="false" aria-controls="picker-list"
-                     aria-autocomplete="list" />
-              <ul class="picker-list" id="picker-list" role="listbox" hidden></ul>
-            </div>
-
-            <div class="relate-actions">
-              <button id="relate-find" class="btn primary" type="button" disabled>
-                <svg class="icon"><use href="#i-search" /></svg>
-                <span id="relate-find-label">Find photos</span>
-              </button>
-              <button id="relate-clear" class="btn quiet" type="button">
-                Clear
-              </button>
-              <button id="relate-export" class="btn quiet" type="button" disabled>
-                <svg class="icon"><use href="#i-copy" /></svg>
-                <span>Export these photos</span>
-              </button>
-            </div>
-
-            <p class="note relate-error" id="relate-error" hidden></p>
-
-            <!-- summary + venn -->
-            <div class="relate-summary" id="relate-summary" hidden>
-              <div class="relate-count">
-                <p class="tnum" id="relate-found">0</p>
-                <p class="micro" id="relate-wording">matching photos</p>
-              </div>
-              <svg class="venn" id="venn" viewBox="0 0 320 180"
-                   role="img" aria-label="Overlap between the selected people"></svg>
-            </div>
-
-            <div class="results" id="relate-results" hidden></div>
-
-            <!-- co-occurrence heatmap -->
-            <section class="heatmap-block" id="heatmap-block" hidden>
-              <div class="heatmap-head">
-                <h2 class="title">Who appears together</h2>
-                <p class="note">
-                  Darker means more shared photos. Click a pair to search for
-                  those two.
-                </p>
-              </div>
-              <div class="heatmap" id="heatmap"></div>
-            </section>
-          </div>
-        </section>
-
-        <!-- 1 · CONFIGURE ------------------------------------------- -->
-        <section class="view is-active" data-view="configure" aria-label="Configure">
-          <div class="sheet">
-            <p class="kicker">Step one</p>
-            <h1 class="display">Point it at a folder.<br />It finds the people.</h1>
-            <p class="lede">
-              FaceSort groups photos by whose face is in them, then files each
-              one into a folder named after that person. Nothing is uploaded,
-              and no face or name ever leaves this machine.
-            </p>
-
-            <!-- Not a dashed pill-box: a full-width target with a hard edge
-                 that only lifts on interaction. -->
-            <div class="target" id="dropzone" tabindex="0" role="button"
-                 aria-label="Choose or drop the folder with your photos">
-              <svg class="icon target-icon" aria-hidden="true"><use href="#i-folder-open" /></svg>
-              <div class="target-text">
-                <strong>Drop a photo folder here</strong>
-                <span>or <span class="link">browse</span> for one</span>
-              </div>
-              <span class="target-chosen" id="dropzone-chosen"></span>
-            </div>
-
-            <ul class="facts-row">
-              <li><b>Automatic</b><span>Same person, same folder</span></li>
-              <li><b>You decide</b><span>Name or skip every group</span></li>
-              <li><b>Offline</b><span>No upload, ever</span></li>
-            </ul>
-          </div>
-        </section>
-
-        <!-- 2 · SCANNING --------------------------------------------- -->
-        <section class="view" data-view="scanning" aria-label="Scanning" hidden>
-          <div class="sheet scan-sheet">
-            <p class="kicker">Step two</p>
-            <!-- The number is the hero. Everything else is quiet. -->
-            <p class="readout">
-              <span class="readout-value tnum" id="scan-percent">0%</span>
-            </p>
-            <p class="scan-status">
-              <span class="beat" aria-hidden="true"></span>
-              <span id="scan-text">Preparing…</span>
-            </p>
-
-            <div class="meter-rail tall" role="progressbar" aria-valuemin="0"
-                 aria-valuemax="100" aria-valuenow="0" id="scan-bar-wrap">
-              <span class="meter-fill accent" id="scan-bar"></span>
-            </div>
-
-            <figure class="preview">
-              <img id="preview-img" alt="" decoding="async" />
-              <figcaption class="micro" id="preview-name">—</figcaption>
-            </figure>
-
-            <ul class="stat-strip" id="scan-stats"></ul>
-          </div>
-        </section>
-
-        <!-- 3 · REVIEW ----------------------------------------------- -->
-        <section class="view" data-view="review" aria-label="Review groups" hidden>
-          <div class="sheet-bar">
-            <div class="sheet-bar-text">
-              <p class="kicker">Step three</p>
-              <h2 class="title">Name each group</h2>
-            </div>
-            <div class="sheet-bar-actions">
-              <div class="search">
-                <svg class="icon" aria-hidden="true"><use href="#i-search" /></svg>
-                <input id="cluster-search" type="search" placeholder="Filter by name"
-                       aria-label="Filter groups by name" />
-              </div>
-              <!-- Manual age bridge: pick two groups, assert they are one person. -->
-              <button id="link-toggle" class="btn quiet" type="button"
-                      aria-pressed="false">
-                <svg class="icon"><use href="#i-link" /></svg>
-                <span>Same person?</span>
-              </button>
-              <label class="switch">
-                <input type="checkbox" id="auto-celebrate" checked />
-                <span class="switch-track" aria-hidden="true"></span>
-                <span class="micro">Confetti</span>
-              </label>
-              <!-- The goal action lives with the work, at full strength. -->
-              <button id="organize" class="btn primary" type="button" disabled>
-                <svg class="icon"><use href="#i-folder" /></svg>
-                <span id="organize-label">Sort into folders</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- merge tray: appears only in link mode -->
-          <div class="merge-tray" id="merge-tray" hidden>
-            <div class="merge-slots">
-              <div class="merge-slot" id="merge-slot-a" data-slot="a">
-                <span class="eyebrow">First group</span>
-                <span class="merge-slot-empty">Select a group</span>
-              </div>
-              <svg class="icon merge-link" aria-hidden="true"><use href="#i-link" /></svg>
-              <div class="merge-slot" id="merge-slot-b" data-slot="b">
-                <span class="eyebrow">Second group</span>
-                <span class="merge-slot-empty">Select a group</span>
-              </div>
-            </div>
-            <div class="merge-bar">
-              <div class="merge-name">
-                <label class="label" for="merge-name">Who is it?</label>
-                <input id="merge-name" type="text" autocomplete="off"
-                       placeholder="Leave blank to link for this run only" />
-              </div>
-              <button id="merge-cancel" class="btn quiet" type="button">Cancel</button>
-              <button id="merge-confirm" class="btn primary" type="button" disabled>
-                <svg class="icon"><use href="#i-check" /></svg>
-                <span>Link groups</span>
-              </button>
-            </div>
-            <p class="note merge-hint">
-              Use this when one person appears in two groups — usually a
-              childhood photo and an adult one. Naming them here also
-              remembers the link, so future scans group them on their own.
-            </p>
-          </div>
-
-          <div class="clusters" id="clusters"></div>
-        </section>
-
-        <!-- 4 · DONE ------------------------------------------------ -->
-        <section class="view" data-view="done" aria-label="Finished" hidden>
-          <div class="sheet finish">
-            <div class="success-mark" aria-hidden="true">
-              <svg viewBox="0 0 72 72" class="check">
-                <circle class="check-circle" cx="36" cy="36" r="32" />
-                <path class="check-tick" d="M22 37.5 32.5 48 51 27" />
-              </svg>
-            </div>
-            <h1 class="display small">All sorted</h1>
-            <p class="lede center" id="done-sub">Your photos are in their new folders.</p>
-
-            <dl class="tally" id="done-stats"></dl>
-            <ul class="ledger" id="folder-list"></ul>
-
-            <div class="finish-actions">
-              <button class="btn primary" id="done-open" type="button">
-                <svg class="icon"><use href="#i-folder-open" /></svg> Open output folder
-              </button>
-              <button class="btn quiet" id="done-again" type="button">
-                <svg class="icon"><use href="#i-refresh" /></svg> Scan another folder
-              </button>
-              <button class="btn quiet" id="done-celebrate" type="button">
-                <svg class="icon"><use href="#i-party" /></svg> Celebrate
-              </button>
-            </div>
-
-            <!-- ---------------------------------------------- gallery -- -->
-            <section class="gallery-panel" id="gallery-panel">
-              <div class="gallery-head">
-                <p class="kicker">Bonus</p>
-                <h2 class="title">Build a photo gallery website</h2>
-                <p class="note gallery-lede">
-                  A folder you can email, zip or put on a stick. It opens in any
-                  browser with no internet, and has a full-screen viewer.
-                </p>
-              </div>
-
-              <div class="field">
-                <span class="label">Include</span>
-                <div class="segmented" role="radiogroup" aria-label="Who to include">
-                  <button type="button" class="seg is-active" data-gal-mode="all"
-                          role="radio" aria-checked="true">Everyone</button>
-                  <button type="button" class="seg" data-gal-mode="people"
-                          role="radio" aria-checked="false">Only some people</button>
-                </div>
-              </div>
-
-              <div class="field" id="gal-people-field" hidden>
-                <span class="label">People</span>
-                <div class="people-picker" id="gal-people"></div>
-                <p class="note" id="gal-people-empty">Nobody has been named yet.</p>
-              </div>
-
-              <div class="field">
-                <label class="label" for="gal-password">Password (optional)</label>
-                <div class="row">
-                  <input id="gal-password" type="password" autocomplete="new-password"
-                         placeholder="Leave empty for no password" />
-                  <button class="icon-btn" id="gal-password-toggle" type="button"
-                          aria-label="Show password" title="Show password">
-                    <svg class="icon"><use href="#i-eye" /></svg>
-                  </button>
-                </div>
-                <p class="note">
-                  A simple gate, not encryption — the photos sit in the folder
-                  and anyone technical can open them directly.
-                </p>
-              </div>
-
-              <label class="check">
-                <input type="checkbox" id="gal-thumbs" checked />
-                <span class="check-box" aria-hidden="true">
-                  <svg class="icon"><use href="#i-check" /></svg>
-                </span>
-                <span>Make smaller thumbnails
-                  <small class="micro">Recommended — much faster to browse</small>
-                </span>
-              </label>
-
-              <div class="field">
-                <span class="label">Save to</span>
-                <div class="row">
-                  <input id="gal-path" type="text" spellcheck="false"
-                         placeholder="Choose a folder for the gallery" />
-                  <button class="icon-btn" id="gal-pick" type="button"
-                          aria-label="Choose a folder" title="Choose a folder">
-                    <svg class="icon"><use href="#i-folder-open" /></svg>
-                  </button>
-                </div>
-              </div>
-
-              <p class="note gallery-error" id="gal-error" hidden></p>
-
-              <div class="gallery-progress" id="gal-progress" hidden>
-                <div class="meter-head">
-                  <span id="gal-progress-label">Building…</span>
-                  <span class="tnum" id="gal-progress-count">0 / 0</span>
-                </div>
-                <div class="meter-rail"><span class="meter-fill accent" id="gal-bar"></span></div>
-              </div>
-
-              <div class="gallery-actions">
-                <button class="btn primary" id="gal-build" type="button">
-                  <svg class="icon"><use href="#i-camera" /></svg> Generate gallery
-                </button>
-              </div>
-
-              <div class="gallery-done" id="gal-done" hidden>
-                <div class="success-mark small" aria-hidden="true">
-                  <svg viewBox="0 0 72 72" class="check">
-                    <circle class="check-circle" cx="36" cy="36" r="32" />
-                    <path class="check-tick" d="M22 37.5 32.5 48 51 27" />
-                  </svg>
-                </div>
-                <p class="title" id="gal-done-title">Gallery generated</p>
-                <p class="note" id="gal-done-path"></p>
-                <p class="note" id="gal-done-stats"></p>
-                <div class="gallery-done-actions">
-                  <button class="btn primary" id="gal-open" type="button">
-                    <svg class="icon"><use href="#i-folder-open" /></svg> Open in browser
-                  </button>
-                  <button class="btn quiet" id="gal-open-folder" type="button">
-                    <svg class="icon"><use href="#i-folder" /></svg> Show folder
-                  </button>
-                </div>
-              </div>
-            </section>
-          </div>
-        </section>
-      </main>
-    </div>
+      </footer>
+    </main>
   </div>
 
   <!-- ========================================================= overlays == -->
@@ -590,10 +534,10 @@
       <input id="modal-name" type="text" autocomplete="off" placeholder="e.g. Alex" />
       <p class="modal-error" id="modal-error" hidden></p>
       <div class="modal-actions">
-        <button class="btn quiet" type="button" id="modal-skip">Send to _unknown</button>
+        <button class="btn ghost" type="button" id="modal-skip">Send to _unknown</button>
         <span class="spacer"></span>
-        <button class="btn quiet" type="button" data-close-modal>Cancel</button>
-        <button class="btn primary" type="button" id="modal-save">Save name</button>
+        <button class="link" type="button" data-close-modal>Cancel</button>
+        <button class="btn sm" type="button" id="modal-save">Save name</button>
       </div>
     </div>
   </div>

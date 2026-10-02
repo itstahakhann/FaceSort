@@ -51,11 +51,12 @@ Implemented (M1 + M2 + M3 + M4 + M5 + M6):
   **Run Organizer** button that does the sorting — all offline, and the
   scan is cached in the session so interacting with the page never
   re-runs the face pipeline
-- **Electron desktop app (M5):** the shipped Windows app — a native-feeling
-  window with a config sidebar, a grid of cluster cards with face thumbnails
-  and per-group name inputs, a live progress bar, and one **Sort into
-  folders** action; the Python engine runs as a hidden child process and
-  the whole thing installs as a single `.exe` — see
+- **Electron desktop app (M5):** the shipped Windows app — one centred
+  editorial column with three sections (**Organise**, **People together**,
+  **Share gallery**), an enormous count for the count-as-hero moments, a grid
+  of group cards with face thumbnails, a manual "same person?" merge, and one
+  primary action per screen; the Python engine runs as a hidden child process
+  and the whole thing installs as a single `.exe` — see
   [Desktop app](#desktop-app-electron--python)
 - **Local REST API (M5):** the engine behind the UI exposes `POST /scan`,
   `GET /clusters`, `POST /name_cluster`, `POST /organize` and `GET /status`
@@ -481,30 +482,67 @@ The desktop app is two pieces that meet on a loopback socket:
 
 ### The interface
 
-Four views, driven by one small state machine:
+One centred column, three sections in the top bar, and a small state machine
+underneath.
 
-1. **Configure** — pick (or drag-and-drop) the input folder, choose the
-   destination, tune tolerance / min faces / worker processes and copy-vs-move.
-2. **Scan** — gradient progress bar with a live percentage and the current
-   file, a **live preview of the image being processed** (`GET /thumb`),
-   shimmer skeletons and an animated orb.
-3. **Review** — one card per group with cropped face thumbnails; hovering
-   lifts the card and zooms the grid, clicking a face opens it full-screen
-   (`/photo`), *Details* flips the card in 3D to show the destination folder
-   and every file, naming opens a slide-up dialog with suggestions, and a
-   toast confirms each name. Cards are titled by the person's name once set,
-   and the filter box narrows them as you type. **Same person?** links two
-   groups that should be one (see [Age invariance](#age-invariance-childhood-adult-photos)).
-4. **Finish** — animated checkmark, per-folder counts, "open output folder"
-   and an optional confetti celebration.
+**Navigation is a menu of things you might want, not a progress chart.**
+`Organise` owns the whole pipeline as four internal stages; `People together`
+and `Share gallery` are separate destinations you can reach at any time.
+
+1. **Choose** — the opening screen: one promise, one action, a drop target,
+   the destination inline, and settings behind a *Change settings* link. They
+   are set once and rarely touched, and folding them away keeps the first
+   screen to a single idea.
+2. **Look** — the count is the headline, at headline size, with a 12 px rail
+   underneath for the eye that wants a proportion. A filmstrip of recently
+   read photos scrolls past so a long scan visibly moves, and there is a
+   live preview of the current image (`GET /thumb`).
+3. **Name** — one card per group with cropped face thumbnails; clicking a
+   face opens it full-screen (`/photo`), *Details* flips the card in 3D to
+   show the destination folder and every file, naming opens a dialog with
+   name suggestions, and a toast confirms each name. Cards are titled by the
+   person's name once set, and the filter narrows them as you type.
+   **Same person?** links two groups that should be one (see
+   [Age invariance](#age-invariance-childhood-adult-photos)).
+4. **Sort** — the destination folders appear as they are created and photos
+   physically fly from the pile into them, one at a time, with the folder lid
+   flicking open as each lands. While this runs the screen answers "how far
+   along"; the checkmark, headline and tally only appear once it is true.
+
+Then **People together** (big count, Venn, results, co-occurrence heatmap) and
+**Share gallery**.
+
+### Design system
+
+A stone-and-ink editorial system, no framework:
+
+- **Palette** — a neutral stone ramp, one emerald accent, one amber for
+  "working". Nothing else. Light and dark are the same ramp inverted, so
+  there is exactly one theme to design.
+- **Structure from rules, not boxes.** 1px and 2px hairlines divide content;
+  there are no card shadows and effectively no corner radii. That is what
+  keeps a dense screen reading as one page rather than a pile of cards.
+- **Type** — three families, each with one job: a condensed face for
+  statements and counts, the system face for reading, monospace for anything
+  the user might copy or compare.
+- **One primary action per screen**, always the largest thing on it.
+  Secondary actions are underlined text — if it is underlined, it will not
+  surprise you.
+- **Counts are headlines.** When the number is the answer to the question the
+  screen asked, it is set at display size, not in a corner of a status bar.
+- **Fills one screen.** Type and spacing scale with `clamp()` against `vh`, so
+  the app fits a laptop window without scrolling and still fills a large one.
+  Content-heavy screens scroll inside the stage; the page itself never does.
+- **Focus is never removed** — a 3px ink outline on every control.
 
 Extras: dark/light theme (persisted, follows the OS on first run), toasts, a
-scroll-to-top button, a search filter for groups, an engine log panel, and
-`prefers-reduced-motion` support.
+scroll-to-top button, an engine log panel, and `prefers-reduced-motion`
+support, which disables the flying-photo and confetti animations rather than
+merely speeding them up.
 
 Performance notes: animation is restricted to `transform`/`opacity` (no layout
-thrash), staggered card reveals are capped at 12 cards, and `will-change` is
-deliberately avoided.
+thrash), staggered card reveals are capped, and `will-change` is deliberately
+avoided.
 
 `main.js` resolves the engine from the mode it is running in, and logs the
 exact path before spawning it (this is the first thing to check when startup
@@ -897,9 +935,9 @@ FaceSort/
 │   ├── preload.js       # the only renderer↔Node bridge (REST + dialogs)
 │   ├── build/icon.ico   # app icon (regenerate: python tools/make_icon.py)
 │   └── renderer/
-│       ├── index.html   # sidebar + cluster grid
-│       ├── styles.css   # theme (no framework, no build step)
-│       └── app.js       # UI logic against the five endpoints
+│       ├── index.html   # shell: brand, three-section nav, one stage
+│       ├── styles.css   # design system (no framework, no build step)
+│       └── app.js       # view state machine + the five endpoints
 ├── tools/
 │   └── make_icon.py     # regenerates electron/build/icon.ico
 ├── build.bat            # master build script (Windows): PyInstaller -> npm run build
