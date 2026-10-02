@@ -304,13 +304,10 @@ function installRendererDiagnostics(webContents) {
       return JSON.stringify({
         title: document.title,
         bridge: typeof window.faceorg,
-        view: (document.querySelector('.view.is-active') || {}).dataset
-          ? document.querySelector('.view.is-active').dataset.view : null,
-        sections: [...document.querySelectorAll('.nav [data-nav]')]
-          .map((b) => b.dataset.nav),
-        cards: document.querySelectorAll('.clusters .flip').length,
-        shell: !!(el('scan') && el('input-folder') && el('nav')),
-        theme: document.documentElement.dataset.theme,
+        cards: document.querySelectorAll('.card').length,
+        sidebar: !!(el('scan') && el('input-folder')),
+        emptyShown: el('empty-state') ? !el('empty-state').hidden : null,
+        toast: el('toast') ? el('toast').textContent : null,
         enginePort: (window.faceorg && window.faceorg.ready()) ? 'ready' : 'waiting'
       });
     })()`;

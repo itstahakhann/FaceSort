@@ -18,13 +18,12 @@ const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matc
 
 const ui = {
   app: $('app'),
-  nav: [...document.querySelectorAll('.nav [data-nav]')],
-  settings: $('settings'),
-  settingsToggle: $('settings-toggle'),
+  sidebar: $('sidebar'),
+  drawerToggle: $('drawer-toggle'),
   enginePill: $('engine-pill'),
   engineLabel: $('engine-label'),
   themeToggle: $('theme-toggle'),
-  outPath: $('out-path'),
+  progressFill: $('progress-fill'),
 
   input: $('input-folder'),
   output: $('output-folder'),
@@ -59,8 +58,17 @@ const ui = {
   scanPercent: $('scan-percent'),
   scanText: $('scan-text'),
   scanStats: $('scan-stats'),
+  scanStrip: $('scan-strip'),
   previewImg: $('preview-img'),
   previewName: $('preview-name'),
+  sortStage: $('sort-stage'),
+  sortPercent: $('sort-percent'),
+  sortText: $('sort-text'),
+  sortBar: $('sort-bar'),
+  sortBarWrap: $('sort-bar-wrap'),
+  sortZone: $('sortzone'),
+  sortSrc: $('sort-src'),
+  sortFold: $('sort-fold'),
   clusters: $('clusters'),
   clusterSearch: $('cluster-search'),
   autoCelebrate: $('auto-celebrate'),
@@ -72,20 +80,11 @@ const ui = {
   mergeConfirm: $('merge-confirm'),
   mergeCancel: $('merge-cancel'),
   doneStats: $('done-stats'),
-  doneTitle: $('done-title'),
   folderList: $('folder-list'),
   doneOpen: $('done-open'),
   doneAgain: $('done-again'),
   doneCelebrate: $('done-celebrate'),
   scrollTop: $('scroll-top'),
-  sortZone: $('sortzone'),
-  sortSrc: $('sort-src'),
-  sortFold: $('sort-fold'),
-  sortReadout: $('sorting-readout'),
-  sortNum: $('sort-num'),
-  sortBar: $('sort-bar'),
-  sortStatus: $('sort-status'),
-  scanStrip: $('scan-strip'),
 
   modalLayer: $('modal-layer'),
   modalThumbs: $('modal-thumbs'),
@@ -103,6 +102,7 @@ const ui = {
 
   // relationships
   gotoRelate: $('goto-relate'),
+  relateBack: $('relate-back'),
   picker: $('picker'),
   pickerTags: $('picker-tags'),
   pickerInput: $('picker-input'),
@@ -240,34 +240,22 @@ function applyTheme(theme) {
 function initTheme() {
   let stored = null;
   try { stored = localStorage.getItem(THEME_KEY); } catch (error) { /* ignore */ }
-  const preferred = window.matchMedia('(prefers-color-scheme: dark)').matches
-    ? 'dark' : 'light';
+  const preferred = window.matchMedia('(prefers-color-scheme: light)').matches
+    ? 'light' : 'dark';
   applyTheme(stored || preferred);
-  // The label states the mode you would switch *to*, not the one you are in.
-  const label = () => {
-    ui.themeToggle.textContent =
-      document.documentElement.dataset.theme === 'dark' ? 'Light mode' : 'Dark mode';
-  };
-  label();
   ui.themeToggle.addEventListener('click', () => {
     const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
     applyTheme(next);
-    label();
+    toast(`${next === 'dark' ? 'Dark' : 'Light'} theme`, '', 'sparkles');
   });
 }
 
 /* ============================================================== views */
 
-/* Three sections. `configure` owns the whole organise pipeline — scanning,
-   review and done are stages inside it rather than sections of their own, so
-   the top bar stays a menu of things you might want rather than a progress
-   chart you cannot step backwards through. */
 const STEP_ORDER = ['configure', 'scanning', 'review', 'done'];
-const SECTION_OF = {
-  configure: 'configure', scanning: 'configure', review: 'configure', done: 'configure',
-  relate: 'relate', share: 'share',
-};
-const VIEWS = [...STEP_ORDER, 'relate', 'share'];
+// `relate` is reachable from the title bar at any time, so it steps outside
+// the numbered flow rather than taking a step number.
+const VIEWS = [...STEP_ORDER, 'relate'];
 
 function setView(view) {
   if (state.view === view) return;
@@ -277,20 +265,19 @@ function setView(view) {
     section.classList.toggle('is-active', active);
     section.hidden = !active;
   }
-
-  const section = SECTION_OF[view];
-  for (const button of ui.nav) {
-    button.setAttribute('aria-current', button.dataset.nav === section ? 'true' : 'false');
-  }
-
-  // The step line only means something once the pipeline has started.
   const index = STEP_ORDER.indexOf(view);
+  // Leave every step marker alone when we are off the main path.
   const onPath = index > -1;
   for (const step of document.querySelectorAll('.pstep')) {
     const stepIndex = STEP_ORDER.indexOf(step.dataset.step);
     step.classList.toggle('is-current', onPath && stepIndex === index);
     step.classList.toggle('is-done', onPath && stepIndex < index);
   }
+  // one rail that fills to the active step — progress as a quantity, not
+  // decoration. Off the main path it empties rather than lying about position.
+  const reached = onPath && STEP_ORDER.length > 1
+    ? index / (STEP_ORDER.length - 1) : 0;
+  ui.progressFill.style.width = `${reached * 100}%`;
   ui.stage.scrollTop = 0;
   updateScrollTop();
 }
@@ -306,11 +293,7 @@ function setBusy(busy, label) {
   ui.organize.disabled = busy || state.clusters.length === 0;
   ui.pickInput.disabled = busy;
   ui.pickOutput.disabled = busy;
-  // The one button does two things: with no folder chosen it asks for one,
-  // with a folder chosen it starts. Say which.
-  ui.scanLabel.textContent = busy
-    ? 'Working…'
-    : (ui.input && ui.input.value ? 'Scan photos' : 'Choose photo folder');
+  ui.scanLabel.textContent = busy ? 'Working…' : 'Scan photos';
   if (label) ui.organizeLabel.textContent = label;
 }
 
@@ -320,13 +303,6 @@ function showChosenFolder(path) {
   const name = path ? path.split(/[\\/]/).filter(Boolean).pop() : '';
   ui.dropzoneChosen.textContent = name || '';
   ui.dropzone.classList.toggle('has-folder', Boolean(name));
-}
-
-/** Mirror the destination into the always-visible summary on the opening screen. */
-function showOutputFolder(path) {
-  if (ui.output && path !== undefined && ui.output.value !== path) ui.output.value = path;
-  const value = (path !== undefined ? path : (ui.output ? ui.output.value : '')) || '';
-  if (ui.outPath) ui.outPath.textContent = value || 'Not chosen yet';
 }
 
 /* ========================================================== settings */
@@ -353,7 +329,6 @@ function applyStatus(status) {
   if (!ui.output.value) {
     ui.output.value = config.output_exists ? config.output_folder : '';
   }
-  showOutputFolder();
   if (!ui.tolerance.dataset.touched) {
     ui.tolerance.value = String(config.tolerance ?? 0.5);
     syncRange();
@@ -374,12 +349,10 @@ function syncRange() {
 
 function setMode(mode, quiet) {
   state.mode = mode;
-  // Radios rather than a segmented track: this is a two-way choice with no
-  // third state, and a native control announces itself correctly.
-  for (const radio of document.querySelectorAll('input[name="mode"]')) {
-    const active = radio.dataset.mode === mode;
-    radio.checked = active;
-    radio.setAttribute('aria-checked', active ? 'true' : 'false');
+  for (const button of document.querySelectorAll('.seg')) {
+    const active = button.dataset.mode === mode;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-checked', active ? 'true' : 'false');
   }
   if (!quiet) ui.organizeLabel.textContent =
     mode === 'move' ? 'Move into folders' : 'Sort into folders';
@@ -436,18 +409,9 @@ function renderScanStats(stats) {
 /* =========================================================== scanning */
 
 async function startScan() {
-  // No folder chosen yet? Ask for one instead of shouting about a missing
-  // value the user may not know they need to supply.
-  if (!ui.input.value) {
-    const folder = await bridge.pickFolder('input');
-    if (!folder) return;
-    ui.input.value = folder;
-    showChosenFolder(folder);
-  }
   const settings = readSettings();
   if (!settings.input_folder || !settings.output_folder) {
-    toast('Choose an output folder first.', 'warn', 'alert');
-    ui.settings.hidden = false;
+    toast('Choose an input and an output folder first.', 'warn', 'alert');
     (settings.input_folder ? ui.output : ui.input).focus();
     return;
   }
@@ -460,10 +424,11 @@ async function startScan() {
   setView('scanning');
   setBusy(true);
   ui.previewImg.removeAttribute('src');
+  if (ui.scanStrip) ui.scanStrip.replaceChildren();
+  if (ui.sortStage) ui.sortStage.hidden = true;
   ui.previewName.textContent = '—';
-  ui.scanStrip.replaceChildren();
-  ui.scanPercent.textContent = '0';
-  ui.scanBar.style.transform = 'scaleX(0)';
+  ui.scanPercent.textContent = '0%';
+  ui.scanBar.style.width = '0%';
   renderScanStats({});
 
   try {
@@ -499,13 +464,11 @@ async function poll() {
     const total = status.total || 0;
     const done = status.processed || 0;
     const pct = total ? Math.min(100, (done / total) * 100) : 0;
-    // The count is the headline; the rail under it is the same number again,
-    // small, for the eye that wants a proportion.
-    ui.scanBar.style.transform = `scaleX(${pct / 100})`;
+    ui.scanBar.style.width = `${pct}%`;
     ui.scanBarWrap.setAttribute('aria-valuenow', String(Math.round(pct)));
-    ui.scanPercent.textContent = total ? `${done}` : '0';
+    ui.scanPercent.textContent = `${Math.round(pct)}%`;
     ui.scanText.textContent = total
-      ? `${done} of ${total} photos checked — ${status.current || '…'}`
+      ? `Processing image ${done} of ${total} — ${status.current || '…'}`
       : (status.phase || 'Scanning…');
     ui.mini.hidden = false;
     ui.miniBar.style.width = `${pct}%`;
@@ -518,9 +481,10 @@ async function poll() {
   }
 
   if (status.organizing) {
-    // Sorting happens on the finish screen, where the folders are drawn and
-    // the photos fly into them. Staying on review would hide the whole point.
-    setView('done');
+    // Sorting takes over the review screen: the folders appear as they are
+    // created and each photo visibly lands in the right one. Naming is over,
+    // so the cluster grid steps aside while it runs.
+    setView('review');
     setEngine('busy', 'sorting');
     const info = status.organize || {};
     const total = info.total || 0;
@@ -529,6 +493,8 @@ async function poll() {
     ui.miniBar.style.width = `${total ? (done / total) * 100 : 0}%`;
     ui.miniCount.textContent = `${done} / ${total}`;
     ui.miniLabel.textContent = `Sorting ${info.current || 'photos'}`;
+    ui.sortStage.hidden = false;
+    setReviewSorting(true);
     runSortStage({ done, total, current: info.current || '' });
     // a toast per poll tick would bury the UI — the stage itself shows it
     state.poll = setTimeout(poll, 400);
@@ -554,140 +520,6 @@ async function poll() {
   await loadClusters();
 }
 
-/* ------------------------------------------------------- the sort stage */
-
-/* Photos physically fly from the pile into their folder while sorting runs.
-   This is the one place in the app where decoration is allowed, because it
-   reports something true: this is where your photos are going. */
-
-const FOLDER_SVG = `<svg viewBox="0 0 120 90" aria-hidden="true">
-  <path d="M4 10h40l10 10h62v66H4z" fill="var(--tint)" stroke="var(--ink)" stroke-width="3" stroke-linejoin="round"/>
-  <path class="lid" d="M4 30h112v56H4z" fill="var(--tint)" stroke="var(--ink)" stroke-width="3" stroke-linejoin="round"/>
-</svg>`;
-
-let sortStage = null;
-
-function runSortStage({ reset = false, done = 0, total = 0, current = '' } = {}) {
-  if (!ui.sortZone) return;
-
-  // Whatever happened last time, if we are rendering then we are visible:
-  // finishSortStage() hides these after the scan settles, and nothing else
-  // would bring them back for the sort itself.
-  ui.sortZone.hidden = false;
-  if (ui.sortReadout) ui.sortReadout.hidden = false;
-  const doneView = document.querySelector('[data-view="done"]');
-  if (doneView) doneView.classList.add('is-sorting');
-
-  if (reset) {
-    ui.sortSrc.replaceChildren();
-    if (ui.previewImg.src) {
-      const frame = document.createElement('div');
-      frame.className = 'frame';
-      const img = document.createElement('img');
-      img.src = ui.previewImg.src;
-      img.alt = '';
-      frame.append(img);
-      ui.sortSrc.append(frame);
-      const label = document.createElement('span');
-      label.textContent = 'Your photos';
-      ui.sortSrc.append(label);
-    }
-    ui.sortFold.replaceChildren();
-    sortStage = { folders: new Map(), last: '' };
-  }
-
-  // `current` arrives as "Alex/photo_12.jpg": the first path segment is the
-  // destination folder. Stripping only the extension would give "Alex/photo_12"
-  // and create a folder per photo.
-  const name = String(current || '').split(/[\\/]/)[0];
-  if (name && !sortStage.folders.has(name)) {
-    const box = document.createElement('div');
-    box.className = 'sort-dest';
-    box.innerHTML = FOLDER_SVG;
-    const label = document.createElement('b');
-    label.textContent = name;
-    const tally = document.createElement('span');
-    tally.className = 'tally';
-    tally.textContent = '0 photos';
-    box.append(label, tally);
-    ui.sortFold.append(box);
-    sortStage.folders.set(name, { box, tally, count: 0 });
-  }
-  const entry = sortStage.folders.get(name);
-  if (entry && current && current !== sortStage.last) {
-    entry.count += 1;
-    entry.tally.textContent = `${entry.count} photo${entry.count === 1 ? '' : 's'}`;
-    sortStage.last = current;
-    flyPhotoInto(entry.box);
-  }
-
-  if (ui.sortReadout && total) {
-    ui.sortReadout.hidden = false;
-    ui.sortNum.textContent = `${done} / ${total}`;
-    ui.sortBar.style.transform = `scaleX(${Math.min(1, done / total)})`;
-    ui.sortStatus.textContent = `Filing ${current || 'photos'}`;
-  }
-}
-
-/** One photo arcing from the pile into its folder. */
-function flyPhotoInto(dest) {
-  if (reducedMotion || !ui.sortZone || !dest) return;
-  const zone = ui.sortZone.getBoundingClientRect();
-  const from = ui.sortSrc.getBoundingClientRect();
-  const to = dest.getBoundingClientRect();
-  if (!zone.width) return;
-
-  const x0 = from.left - zone.left + 8;
-  const y0 = from.top - zone.top;
-  const x1 = to.left - zone.left + to.width / 2 - 22;
-  const y1 = to.top - zone.top + 34;
-
-  const flyer = document.createElement('div');
-  flyer.className = 'flyer';
-  if (ui.previewImg.src) {
-    const img = document.createElement('img');
-    img.src = ui.previewImg.src;
-    img.alt = '';
-    flyer.append(img);
-  }
-  ui.sortZone.append(flyer);
-
-  const animation = flyer.animate([
-    { transform: `translate(${x0}px, ${y0}px) rotate(8deg) scale(1)`, opacity: 1 },
-    { transform: `translate(${(x0 + x1) / 2}px, ${Math.min(y0, y1) - 50}px) rotate(-10deg) scale(.9)`, opacity: 1, offset: .5 },
-    { transform: `translate(${x1}px, ${y1}px) rotate(0deg) scale(.35)`, opacity: .25 },
-  ], { duration: 720, easing: 'cubic-bezier(.4, 0, .2, 1)' });
-  animation.onfinish = () => {
-    flyer.remove();
-    dest.animate(
-      [{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }, { transform: 'scale(1)' }],
-      { duration: 240 },
-    );
-    const lid = dest.querySelector('.lid');
-    if (lid) {
-      lid.animate(
-        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-9deg)' }, { transform: 'rotate(0deg)' }],
-        { duration: 340 },
-      );
-    }
-  };
-}
-
-function finishSortStage() {
-  if (!ui.sortZone || ui.sortZone.hidden) return;
-  for (const { box: dest, tally, count } of (sortStage ? sortStage.folders.values() : [])) {
-    dest.classList.add('is-done');
-    tally.textContent = `${count} photo${count === 1 ? '' : 's'} ✓`;
-  }
-  // Let the last flyers land before the tally replaces the stage.
-  setTimeout(() => {
-    if (ui.sortZone) ui.sortZone.hidden = true;
-    if (ui.sortReadout) ui.sortReadout.hidden = true;
-    const doneView = document.querySelector('[data-view="done"]');
-    if (doneView) doneView.classList.remove('is-sorting');
-  }, 1400);
-}
-
 /** Live preview of the photo being processed (GET /thumb, scoped by the engine). */
 async function showPreview(name) {
   if (!name || name === state.lastPreview) return;
@@ -711,13 +543,152 @@ async function showPreview(name) {
 function pushStrip(dataUrl) {
   if (!ui.scanStrip) return;
   const tile = document.createElement('div');
-  tile.className = 'frame round';
-  const img = document.createElement('img');
-  img.src = dataUrl;
-  img.alt = '';
-  tile.append(img);
+  tile.className = 'strip-tile';
+  const image = document.createElement('img');
+  image.src = dataUrl;
+  image.alt = '';
+  tile.append(image);
   ui.scanStrip.prepend(tile);
-  while (ui.scanStrip.children.length > 16) ui.scanStrip.lastElementChild.remove();
+  while (ui.scanStrip.children.length > 14) ui.scanStrip.lastElementChild.remove();
+}
+
+/* ======================================================== the sort stage */
+
+/* Photos physically fly from the pile into their folder while sorting runs.
+   This is the one place in the app where decoration is allowed, because it
+   reports something true: this is where your photos are going. */
+
+const FOLDER_SVG = `<svg viewBox="0 0 120 90" aria-hidden="true">
+  <path d="M4 10h40l10 10h62v66H4z" fill="var(--n2)" stroke="var(--ink-2)" stroke-width="3" stroke-linejoin="round"/>
+  <path class="lid" d="M4 30h112v56H4z" fill="var(--n2)" stroke="var(--ink-2)" stroke-width="3" stroke-linejoin="round"/>
+</svg>`;
+
+let sortStage = null;
+
+function runSortStage({ reset = false, done = 0, total = 0, current = '' } = {}) {
+  if (!ui.sortStage) return;
+
+  ui.sortStage.hidden = false;
+  ui.sortBarWrap.setAttribute('aria-valuenow', '0');
+
+  if (reset) {
+    // The pile on the left: where every photo starts. A real thumbnail once
+    // one has been read, a neutral block before that, so the left edge of the
+    // stage is never empty.
+    ui.sortSrc.replaceChildren();
+    const pile = document.createElement('span');
+    pile.className = 'pile';
+    if (ui.previewImg && ui.previewImg.src) {
+      const image = document.createElement('img');
+      image.src = ui.previewImg.src;
+      image.alt = '';
+      pile.append(image);
+    }
+    const caption = document.createElement('span');
+    caption.textContent = 'Your photos';
+    ui.sortSrc.append(pile, caption);
+    ui.sortFold.replaceChildren();
+    sortStage = { folders: new Map(), last: '' };
+  }
+
+  // `current` arrives as "Alex/photo_12.jpg": the first path segment is the
+  // destination folder. Stripping only the extension would make one folder
+  // per photo.
+  const name = String(current || '').split(/[\\/]/)[0];
+  if (name && !sortStage.folders.has(name)) {
+    const box = document.createElement('div');
+    box.className = 'sort-dest';
+    box.innerHTML = FOLDER_SVG;
+    const label = document.createElement('b');
+    label.textContent = name;
+    const tally = document.createElement('span');
+    tally.className = 'tally';
+    tally.textContent = '0 photos';
+    box.append(label, tally);
+    ui.sortFold.append(box);
+    sortStage.folders.set(name, { box, tally, count: 0 });
+  }
+  const entry = sortStage.folders.get(name);
+  if (entry && current && current !== sortStage.last) {
+    entry.count += 1;
+    entry.tally.textContent = `${entry.count} photo${entry.count === 1 ? '' : 's'}`;
+    sortStage.last = current;
+    flyPhotoInto(entry.box);
+  }
+
+  if (total) {
+    const pct = Math.min(100, (done / total) * 100);
+    ui.sortPercent.textContent = `${Math.round(pct)}%`;
+    ui.sortBar.style.width = `${pct}%`;
+    ui.sortBarWrap.setAttribute('aria-valuenow', String(Math.round(pct)));
+    ui.sortText.textContent = current
+      ? `Placing ${current}`
+      : 'Creating folders';
+  }
+}
+
+/** One photo arcing from the pile into its folder. */
+function flyPhotoInto(dest) {
+  if (reducedMotion || !ui.sortZone || !dest) return;
+  const zone = ui.sortZone.getBoundingClientRect();
+  const from = ui.sortSrc.getBoundingClientRect();
+  const to = dest.getBoundingClientRect();
+  if (!zone.width) return;
+
+  const x0 = from.left - zone.left + 8;
+  const y0 = from.top - zone.top;
+  const x1 = to.left - zone.left + to.width / 2 - 22;
+  const y1 = to.top - zone.top + 34;
+
+  const flyer = document.createElement('div');
+  flyer.className = 'flyer';
+  if (ui.previewImg && ui.previewImg.src) {
+    const image = document.createElement('img');
+    image.src = ui.previewImg.src;
+    image.alt = '';
+    flyer.append(image);
+  }
+  ui.sortZone.append(flyer);
+
+  const animation = flyer.animate([
+    { transform: `translate(${x0}px, ${y0}px) rotate(8deg) scale(1)`, opacity: 1 },
+    { transform: `translate(${(x0 + x1) / 2}px, ${Math.min(y0, y1) - 50}px) rotate(-10deg) scale(.9)`, opacity: 1, offset: 0.5 },
+    { transform: `translate(${x1}px, ${y1}px) rotate(0deg) scale(.35)`, opacity: 0.25 },
+  ], { duration: 720, easing: 'cubic-bezier(.4, 0, .2, 1)' });
+  animation.onfinish = () => {
+    flyer.remove();
+    dest.animate(
+      [{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }, { transform: 'scale(1)' }],
+      { duration: 240 },
+    );
+    const lid = dest.querySelector('.lid');
+    if (lid) {
+      lid.animate(
+        [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-9deg)' }, { transform: 'rotate(0deg)' }],
+        { duration: 340 },
+      );
+    }
+  };
+}
+
+/** The sort stage takes the review screen over; naming controls go. */
+function setReviewSorting(on) {
+  const view = document.querySelector('[data-view="review"]');
+  if (view) view.classList.toggle('is-sorting', Boolean(on));
+  if (ui.clusters) ui.clusters.hidden = Boolean(on);
+  if (ui.mergeTray) ui.mergeTray.hidden = Boolean(on) || !state.linking;
+}
+
+/** Stamp each folder as finished, then hand the screen back to the tally. */
+function finishSortStage() {
+  if (!ui.sortStage || ui.sortStage.hidden) return;
+  for (const { box: dest, tally, count } of (sortStage ? sortStage.folders.values() : [])) {
+    dest.classList.add('is-done');
+    tally.textContent = `${count} photo${count === 1 ? '' : 's'}`;
+    dest.classList.add('is-done');
+  }
+  // Let the last flyers land before the stage steps aside.
+  setTimeout(() => { if (ui.sortStage) ui.sortStage.hidden = true; }, 1400);
 }
 
 /* ============================================================ review */
@@ -731,6 +702,8 @@ async function loadClusters() {
       if (cluster.name) state.names.set(cluster.id, cluster.name);
     }
     renderClusters();
+    if (ui.sortStage) ui.sortStage.hidden = true;
+    setReviewSorting(false);
     setView('review');
     setEngine('ready', 'ready');
     ui.organize.disabled = state.clusters.length === 0;
@@ -1161,6 +1134,9 @@ async function runOrganize() {
     : 'Copying photos into their folders…', '', 'folder');
   try {
     runSortStage({ reset: true });
+    setView('review');
+    ui.sortStage.hidden = false;
+    setReviewSorting(true);
     await bridge.api.organize(state.mode);
     clearTimeout(state.poll);
     poll();
@@ -1176,10 +1152,7 @@ async function runOrganize() {
 /* "Which photos have these people together?" — backed by the per-(person,
  * photo) occurrence table, not by the capped sample paths. */
 
-/* Three sets need three distinguishable rings, so this is the one place the
-   app spends more than one hue. They are still the system's own colours —
-   accent, highlight, ink — rather than an arbitrary palette. */
-const VENN_COLORS = ['var(--accent)', 'var(--hi)', 'var(--mute)'];
+const VENN_COLORS = ['var(--accent)', '#7c5cff', '#10b981'];
 
 function relateError(message) {
   ui.relateError.textContent = message || '';
@@ -1755,11 +1728,12 @@ function showDone(status) {
     // <dl> needs dt/dd, so each cell is a div wrapper holding the pair
     const cell = document.createElement('div');
     const term = document.createElement('dt');
+    term.className = 'sr-only';
     term.textContent = label;
     const detail = document.createElement('dd');
     const strong = document.createElement('b');
     strong.textContent = String(value);
-    detail.append(strong);
+    detail.append(strong, document.createTextNode(label));
     cell.append(term, detail);
     ui.doneStats.append(cell);
   });
@@ -1944,48 +1918,25 @@ function wire() {
   for (const field of [ui.minFaces, ui.workers]) {
     field.addEventListener('input', () => { field.dataset.touched = '1'; });
   }
-  for (const radio of document.querySelectorAll('input[name="mode"]')) {
-    radio.addEventListener('change', () => { if (radio.checked) setMode(radio.dataset.mode); });
+  for (const button of document.querySelectorAll('.seg')) {
+    button.addEventListener('click', () => setMode(button.dataset.mode));
   }
-
-  // The three sections. `configure` is where you get to when you want to
-  // organise, wherever you were — the pipeline continues from wherever it
-  // left off rather than restarting.
-  for (const button of ui.nav) {
-    button.addEventListener('click', async () => {
-      const target = button.dataset.nav;
-      if (target === 'share') {
-        setView('share');
-        await renderGalleryPeople();
-      } else if (target === 'relate') {
-        await openRelate();
-      } else {
-        // Back to organising. Resume the pipeline where it left off rather
-        // than dumping the user on the opening screen mid-task.
-        setView(state.clusters.length ? 'review' : 'configure');
-      }
-    });
-  }
-
-  // Settings live behind a link rather than in a permanent sidebar: they are
-  // set once and then rarely touched, and the opening screen is better for it.
-  ui.settingsToggle.addEventListener('click', () => {
-    const open = ui.settings.hidden;
-    ui.settings.hidden = !open;
-    ui.settingsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) ui.input.focus();
-  });
 
   ui.pickInput.addEventListener('click', pickInputFolder);
   ui.pickOutput.addEventListener('click', async () => {
     const folder = await bridge.pickFolder('output');
-    if (folder) showOutputFolder(folder);
+    if (folder) ui.output.value = folder;
   });
-  ui.output.addEventListener('input', () => showOutputFolder());
 
   ui.scan.addEventListener('click', startScan);
   ui.organize.addEventListener('click', runOrganize);
   // relationships
+  ui.gotoRelate.addEventListener('click', openRelate);
+  ui.relateBack.addEventListener('click', () => {
+    // Return to wherever the numbered flow was, not always step one.
+    setView(state.clusters.length ? 'review' : 'configure');
+    hidePicker();
+  });
   ui.pickerInput.addEventListener('input', () => renderPickerList(-1));
   ui.pickerInput.addEventListener('focus', () => renderPickerList(-1));
   ui.pickerInput.addEventListener('keydown', (event) => {
@@ -2100,6 +2051,12 @@ function wire() {
   ui.logToggle.addEventListener('click', () => {
     ui.log.hidden = !ui.log.hidden;
     ui.logToggle.title = ui.log.hidden ? 'Show engine log' : 'Hide engine log';
+  });
+
+  // narrow layout drawer
+  ui.drawerToggle.addEventListener('click', () => {
+    const open = ui.sidebar.classList.toggle('is-open');
+    ui.drawerToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   });
 
   // engine events
