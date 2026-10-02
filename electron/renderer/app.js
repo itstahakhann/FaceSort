@@ -90,6 +90,26 @@ const ui = {
   toasts: $('toasts'),
   live: $('live'),
   confetti: $('confetti'),
+
+  // relationships
+  gotoRelate: $('goto-relate'),
+  relateBack: $('relate-back'),
+  picker: $('picker'),
+  pickerTags: $('picker-tags'),
+  pickerInput: $('picker-input'),
+  pickerList: $('picker-list'),
+  relateFind: $('relate-find'),
+  relateFindLabel: $('relate-find-label'),
+  relateClear: $('relate-clear'),
+  relateExport: $('relate-export'),
+  relateError: $('relate-error'),
+  relateSummary: $('relate-summary'),
+  relateFound: $('relate-found'),
+  relateWording: $('relate-wording'),
+  venn: $('venn'),
+  relateResults: $('relate-results'),
+  heatmapBlock: $('heatmap-block'),
+  heatmap: $('heatmap'),
 };
 
 const state = {
@@ -108,6 +128,12 @@ const state = {
   /** Manual age bridge ("same person?"). */
   linking: false,
   linkPicks: [],           // cluster ids chosen, in order; max 2
+  /** Relationship search. */
+  people: [],              // [{name, photos}] from /people_list
+  peopleLoaded: false,
+  picks: [],               // selected names
+  relation: null,          // last /intersection payload
+  lastExportFolder: '',
 };
 
 /* ====================================================== tiny helpers */
@@ -186,6 +212,9 @@ function initTheme() {
 /* ============================================================== views */
 
 const STEP_ORDER = ['configure', 'scanning', 'review', 'done'];
+// `relate` is reachable from the title bar at any time, so it steps outside
+// the numbered flow rather than taking a step number.
+const VIEWS = [...STEP_ORDER, 'relate'];
 
 function setView(view) {
   if (state.view === view) return;
@@ -196,13 +225,17 @@ function setView(view) {
     section.hidden = !active;
   }
   const index = STEP_ORDER.indexOf(view);
+  // Leave every step marker alone when we are off the main path.
+  const onPath = index > -1;
   for (const step of document.querySelectorAll('.pstep')) {
     const stepIndex = STEP_ORDER.indexOf(step.dataset.step);
-    step.classList.toggle('is-current', stepIndex === index);
-    step.classList.toggle('is-done', stepIndex < index);
+    step.classList.toggle('is-current', onPath && stepIndex === index);
+    step.classList.toggle('is-done', onPath && stepIndex < index);
   }
-  // one rail that fills to the active step — progress as a quantity, not decoration
-  const reached = STEP_ORDER.length > 1 ? index / (STEP_ORDER.length - 1) : 0;
+  // one rail that fills to the active step — progress as a quantity, not
+  // decoration. Off the main path it empties rather than lying about position.
+  const reached = onPath && STEP_ORDER.length > 1
+    ? index / (STEP_ORDER.length - 1) : 0;
   ui.progressFill.style.width = `${reached * 100}%`;
   ui.stage.scrollTop = 0;
   updateScrollTop();
@@ -907,6 +940,407 @@ async function runOrganize() {
   }
 }
 
+/* ===================================================== relationships */
+/* "Which photos have these people together?" — backed by the per-(person,
+ * photo) occurrence table, not by the capped sample paths. */
+
+const VENN_COLORS = ['var(--accent)', '#7c5cff', '#10b981'];
+
+function relateError(message) {
+  ui.relateError.textContent = message || '';
+  ui.relateError.hidden = !message;
+}
+
+async function loadPeople(force) {
+  if (state.peopleLoaded && !force) return state.people;
+  try {
+    const payload = await bridge.api.peopleList();
+    state.people = payload.people || [];
+    state.peopleLoaded = true;
+    if (!payload.db) {
+      relateError(
+        'The name database is disabled, so there are no recorded photos to '
+        + 'search yet. Name some groups in Review first.');
+    }
+    return state.people;
+  } catch (error) {
+    relateError(String(error.message || error));
+    return [];
+  }
+}
+
+function renderPickTags() {
+  ui.pickerTags.replaceChildren();
+  state.picks.forEach((name) => {
+    const tag = document.createElement('span');
+    tag.className = 'pick-tag';
+    tag.append(document.createTextNode(name));
+    const entry = state.people.find((p) => p.name === name);
+    if (entry && entry.photos) {
+      const count = document.createElement('small');
+      count.textContent = entry.photos;
+      tag.append(count);
+    }
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', `Remove ${name}`);
+    remove.append(icon('x'));
+    remove.addEventListener('click', () => {
+      state.picks = state.picks.filter((n) => n !== name);
+      renderPickTags();
+      updateRelateButtons();
+      if (state.picks.length) runIntersection();
+      else {
+        state.relation = null;
+        ui.relateSummary.hidden = true;
+        ui.relateResults.hidden = true;
+      }
+    });
+    tag.append(remove);
+    ui.pickerTags.append(tag);
+  });
+}
+
+function filteredPeople() {
+  const query = ui.pickerInput.value.trim().toLowerCase();
+  const chosen = new Set(state.picks.map((p) => p.toLowerCase()));
+  return state.people
+    .filter((person) => !chosen.has(person.name.toLowerCase()))
+    .filter((person) => !query || person.name.toLowerCase().includes(query))
+    .slice(0, 60);
+}
+
+function renderPickerList(activeIndex) {
+  const options = filteredPeople();
+  ui.pickerList.replaceChildren();
+  if (!options.length) {
+    const empty = document.createElement('li');
+    empty.className = 'picker-empty';
+    empty.textContent = state.people.length
+      ? 'No one matches that.'
+      : 'Nobody has been named yet.';
+    ui.pickerList.append(empty);
+  }
+  options.forEach((person, index) => {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'picker-option';
+    if (index === activeIndex) button.classList.add('is-active');
+    button.setAttribute('role', 'option');
+    button.append(document.createTextNode(person.name));
+    const count = document.createElement('small');
+    count.textContent = `${person.photos} photo${person.photos === 1 ? '' : 's'}`;
+    button.append(count);
+    button.addEventListener('click', () => addPick(person.name));
+    item.append(button);
+    ui.pickerList.append(item);
+  });
+  ui.pickerList.hidden = false;
+  ui.pickerInput.setAttribute('aria-expanded', 'true');
+}
+
+function hidePicker() {
+  ui.pickerList.hidden = true;
+  ui.pickerInput.setAttribute('aria-expanded', 'false');
+}
+
+function addPick(name) {
+  const clean = String(name || '').trim();
+  if (!clean) return;
+  if (!state.picks.some((p) => p.toLowerCase() === clean.toLowerCase())) {
+    state.picks.push(clean);
+  }
+  ui.pickerInput.value = '';
+  hidePicker();
+  renderPickTags();
+  updateRelateButtons();
+  // Search as soon as there is something to search for. Waiting for the
+  // button meant the summary and the diagram described the *previous*
+  // selection, which is worse than an extra query.
+  runIntersection();
+}
+
+function updateRelateButtons() {
+  const count = state.picks.length;
+  ui.relateFind.disabled = count === 0;
+  ui.relateExport.disabled = !(state.relation && state.relation.count > 0);
+  ui.relateFindLabel.textContent = count === 0
+    ? 'Find photos'
+    : (count === 1 ? "Find this person's photos" : `Find ${count} together`);
+}
+
+async function runIntersection() {
+  if (!state.picks.length) return;
+  relateError('');
+  ui.relateFind.disabled = true;
+  ui.relateFindLabel.textContent = 'Searching…';
+  try {
+    const payload = await bridge.api.intersection(state.picks);
+    state.relation = payload;
+    if (payload.unknown && payload.unknown.length) {
+      relateError(
+        `Not in the name database: ${payload.unknown.join(', ')}. `
+        + 'Pick a name from the list.');
+    }
+    renderRelation();
+  } catch (error) {
+    relateError(String(error.message || error));
+  } finally {
+    updateRelateButtons();
+  }
+}
+
+function renderRelation() {
+  const payload = state.relation;
+  if (!payload) return;
+
+  const photos = payload.photos || [];
+  const names = payload.names || [];
+  ui.relateSummary.hidden = false;
+  ui.relateFound.textContent = String(photos.length);
+  ui.relateWording.textContent = names.length > 1
+    ? `photos with ${names.join(' AND ')}`
+    : (names.length === 1 ? `photos with ${names[0]}` : 'recorded photos');
+
+  renderVenn(names, payload.per_person || {}, photos.length);
+  renderResults(photos, names);
+
+  const canExport = photos.length > 0;
+  ui.relateExport.disabled = !canExport;
+  if (canExport) {
+    ui.relateExport.title =
+      `Copy ${photos.length} photo(s) into a new folder`;
+  }
+}
+
+/** Up to three overlapping circles; the centre count is the intersection. */
+function renderVenn(names, perPerson, total) {
+  const svg = ui.venn;
+  svg.replaceChildren();
+  if (!names.length) return;
+
+  const centres = [[130, 90], [190, 90], [160, 128]];
+  const radius = names.length === 1 ? 46 : (names.length === 2 ? 52 : 42);
+
+  names.slice(0, 3).forEach((name, index) => {
+    const [cx, cy] = centres[index];
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', cx);
+    circle.setAttribute('cy', cy);
+    circle.setAttribute('r', radius);
+    circle.setAttribute('fill', VENN_COLORS[index]);
+    circle.setAttribute('stroke', VENN_COLORS[index]);
+    circle.style.animationDelay = `${index * 70}ms`;
+    svg.append(circle);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', cx);
+    label.setAttribute('y', cy - radius - 8);
+    label.setAttribute('text-anchor', 'middle');
+    label.textContent = name.length > 14
+      ? `${name.slice(0, 13)}…` : name;
+    svg.append(label);
+  });
+
+  if (names.length > 1) {
+    const count = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    count.setAttribute('class', 'venn-count');
+    count.setAttribute('x', 160);
+    count.setAttribute('y', 96);
+    count.setAttribute('text-anchor', 'middle');
+    count.textContent = String(total);
+    svg.append(count);
+  }
+
+  if (names.length > 3) {
+    const more = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    more.setAttribute('x', 160);
+    more.setAttribute('y', 172);
+    more.setAttribute('text-anchor', 'middle');
+    more.textContent = `+${names.length - 3} more`;
+    svg.append(more);
+  }
+}
+
+function renderResults(photos, names) {
+  ui.relateResults.replaceChildren();
+  ui.relateResults.hidden = false;
+
+  if (!photos.length) {
+    const empty = document.createElement('div');
+    empty.className = 'results-empty';
+    empty.append(icon('image'));
+    const strong = document.createElement('strong');
+    strong.textContent = names.length > 1
+      ? 'No photos found with all of them together'
+      : 'No photos recorded for that person';
+    const detail = document.createElement('p');
+    detail.className = 'note';
+    detail.textContent = names.length > 1
+      ? `${names.join(' AND ')} never appear in the same photo that has been `
+        + 'named. They may be there under a name you have not used yet.'
+      : 'Their photos may not have been named yet.';
+    empty.append(strong, detail);
+    ui.relateResults.append(empty);
+    return;
+  }
+
+  photos.slice(0, 400).forEach((path, index) => {
+    const tile = document.createElement('figure');
+    tile.className = 'result-tile';
+    tile.style.animationDelay = `${Math.min(index, 20) * 22}ms`;
+    const image = document.createElement('img');
+    image.loading = 'lazy';
+    image.decoding = 'async';
+    image.alt = path;
+    // Whole-photo preview; a miss just leaves the tile empty rather than
+    // showing a broken image.
+    bridge.photo(basename(path)).then((dataUrl) => {
+      if (dataUrl) image.src = dataUrl;
+    }).catch(() => { /* leave the placeholder */ });
+    const caption = document.createElement('figcaption');
+    caption.textContent = basename(path);
+    tile.append(image, caption);
+    ui.relateResults.append(tile);
+  });
+
+  if (photos.length > 400) {
+    const more = document.createElement('div');
+    more.className = 'results-empty';
+    more.textContent = `Showing the first 400 of ${photos.length}. `
+      + 'Export to get them all.';
+    ui.relateResults.append(more);
+  }
+}
+
+function basename(path) {
+  const parts = String(path).split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] || String(path);
+}
+
+async function renderHeatmap() {
+  try {
+    const payload = await bridge.api.coOccurrence();
+    const names = payload.names || [];
+    if (names.length < 2) {
+      ui.heatmapBlock.hidden = true;
+      return;
+    }
+    const pairs = new Map(
+      (payload.pairs || []).map((p) => [`${p.a}\u0000${p.b}`.toLowerCase(), p.photos]));
+    const max = payload.max || 1;
+
+    // Cap the axis: past ~14 people a square grid stops being readable, and a
+    // heatmap that cannot be read is worse than none.
+    const axis = names.slice(0, 14);
+    const grid = ui.heatmap;
+    grid.replaceChildren();
+    grid.style.gridTemplateColumns =
+      `minmax(64px, auto) repeat(${axis.length}, minmax(26px, 1fr))`;
+
+    const corner = document.createElement('div');
+    corner.className = 'heat-label heat-corner';
+    grid.append(corner);
+    axis.forEach((name) => {
+      const label = document.createElement('div');
+      label.className = 'heat-label';
+      label.title = name;
+      label.textContent = name.length > 9 ? `${name.slice(0, 8)}…` : name;
+      grid.append(label);
+    });
+
+    axis.forEach((rowName, rowIndex) => {
+      const label = document.createElement('div');
+      label.className = 'heat-label row-label';
+      label.title = rowName;
+      label.textContent = rowName.length > 11 ? `${rowName.slice(0, 10)}…` : rowName;
+      grid.append(label);
+
+      axis.forEach((colName, colIndex) => {
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.className = 'heat-cell';
+        if (rowIndex === colIndex) {
+          cell.style.visibility = 'hidden';
+          grid.append(cell);
+          return;
+        }
+        const [first, second] = [rowName, colName].sort((a, b) => a.localeCompare(b));
+        const count = pairs.get(`${first}\u0000${second}`.toLowerCase()) || 0;
+        if (count) {
+          // Alpha carries the magnitude; the hue stays the single accent so
+          // the grid reads as one system rather than a rainbow.
+          const ratio = count / max;
+          cell.classList.add('has-value');
+          cell.style.background =
+            `color-mix(in srgb, var(--accent) ${Math.round(18 + ratio * 72)}%, var(--sunken))`;
+          cell.style.color = ratio > 0.55 ? '#fff' : 'var(--ink)';
+          cell.textContent = count > 99 ? '99+' : String(count);
+          cell.title = `${first} & ${second}: ${plural(count, 'photo')}`;
+          cell.setAttribute('aria-label',
+            `${first} and ${second} share ${plural(count, 'photo')}`);
+          cell.addEventListener('click', () => {
+            state.picks = [first, second];
+            renderPickTags();
+            updateRelateButtons();
+            runIntersection();
+            ui.stage.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' });
+          });
+        } else {
+          cell.title = `${first} & ${second}: no shared photos`;
+        }
+        grid.append(cell);
+      });
+    });
+
+    ui.heatmapBlock.hidden = false;
+    if (names.length > axis.length) {
+      const note = document.createElement('p');
+      note.className = 'note';
+      note.style.marginTop = 'var(--s3)';
+      note.textContent = `Showing the first ${axis.length} of ${names.length} people.`;
+      ui.heatmapBlock.append(note);
+    }
+  } catch (error) {
+    ui.heatmapBlock.hidden = true;
+  }
+}
+
+async function exportIntersection() {
+  if (!state.relation || !state.relation.count) return;
+  const folder = state.lastExportFolder || await bridge.pickFolder('export');
+  if (!folder) return;
+  state.lastExportFolder = folder;
+  ui.relateExport.disabled = true;
+  try {
+    const result = await bridge.api.exportIntersection(
+      state.picks, folder);
+    const bits = [`Copied ${plural(result.copied, 'photo')}`];
+    if (result.skipped && result.skipped.length) {
+      bits.push(`${result.skipped.length} missing`);
+    }
+    if (result.errors && result.errors.length) {
+      bits.push(`${result.errors.length} failed`);
+    }
+    toast(`${bits.join(', ')} → ${basename(folder)}`, 'ok', 'copy');
+  } catch (error) {
+    toast(String(error.message || error), 'error');
+  } finally {
+    updateRelateButtons();
+  }
+}
+
+async function openRelate() {
+  setView('relate');
+  await loadPeople();
+  renderPickTags();
+  updateRelateButtons();
+  renderPickerList(-1);
+  ui.pickerInput.focus();
+  await renderHeatmap();
+}
+
 /* ============================================================== done */
 
 function showDone(status) {
@@ -1127,6 +1561,45 @@ function wire() {
 
   ui.scan.addEventListener('click', startScan);
   ui.organize.addEventListener('click', runOrganize);
+  // relationships
+  ui.gotoRelate.addEventListener('click', openRelate);
+  ui.relateBack.addEventListener('click', () => {
+    // Return to wherever the numbered flow was, not always step one.
+    setView(state.clusters.length ? 'review' : 'configure');
+    hidePicker();
+  });
+  ui.pickerInput.addEventListener('input', () => renderPickerList(-1));
+  ui.pickerInput.addEventListener('focus', () => renderPickerList(-1));
+  ui.pickerInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const first = filteredPeople()[0];
+      addPick(first ? first.name : ui.pickerInput.value);
+    } else if (event.key === 'Backspace' && !ui.pickerInput.value
+               && state.picks.length) {
+      state.picks.pop();
+      renderPickTags();
+      updateRelateButtons();
+      if (state.picks.length) runIntersection();
+    } else if (event.key === 'Escape') {
+      hidePicker();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!ui.picker.contains(event.target)) hidePicker();
+  });
+  ui.relateFind.addEventListener('click', runIntersection);
+  ui.relateClear.addEventListener('click', () => {
+    state.picks = [];
+    state.relation = null;
+    ui.relateSummary.hidden = true;
+    ui.relateResults.hidden = true;
+    relateError('');
+    renderPickTags();
+    updateRelateButtons();
+  });
+  ui.relateExport.addEventListener('click', exportIntersection);
+
   ui.clusterSearch.addEventListener('input', renderClusters);
   ui.linkToggle.addEventListener('click', () => setLinkMode(!state.linking));
   ui.mergeCancel.addEventListener('click', () => setLinkMode(false));

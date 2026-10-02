@@ -405,9 +405,15 @@ function buildMenu() {
 
 /* ------------------------------------------------------------------ IPC */
 
+const FOLDER_DIALOG_TITLES = {
+  output: 'Choose an output folder',
+  export: 'Choose a folder for the matching photos',
+  input: 'Choose an input folder',
+};
+
 ipcMain.handle('dialog:pick-folder', async (_event, kind) => {
   const options = {
-    title: kind === 'output' ? 'Choose an output folder' : 'Choose an input folder',
+    title: FOLDER_DIALOG_TITLES[kind] || FOLDER_DIALOG_TITLES.input,
     properties: ['openDirectory', 'createDirectory'],
   };
   const result = mainWindow

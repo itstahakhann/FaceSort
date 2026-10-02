@@ -108,6 +108,23 @@ contextBridge.exposeInMainWorld('faceorg', {
         body: { cluster_a: clusterA, cluster_b: clusterB, name: name || '' },
         timeout: 60000,
       }),
+
+    /**
+     * Relationship queries. `names` are matched case-insensitively by the
+     * engine; `unknown` comes back so the UI can name a typo instead of
+     * silently showing fewer results than the user asked for.
+     */
+    peopleList: () => call('/people_list', { timeout: 60000 }),
+    intersection: (names) =>
+      call(`/intersection?names=${encodeURIComponent(names.join(','))}`,
+        { timeout: 120000 }),
+    coOccurrence: () => call('/co_occurrence_matrix', { timeout: 120000 }),
+    exportIntersection: (names, outputFolder) =>
+      call('/export_intersection', {
+        method: 'POST',
+        body: { names, output_folder: outputFolder },
+        timeout: 300000,
+      }),
     organize: (mode) =>
       call('/organize', { method: 'POST', body: mode ? { mode } : {}, timeout: 300000 }),
   },

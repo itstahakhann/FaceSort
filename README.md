@@ -321,6 +321,91 @@ on its own.
 `GET /clusters` reports `eye_coverage` per group; the UI shows a note when a
 group leaned on the whole face alone, which is the hint to use the merge.
 
+## Relationships — "which photos have them together?"
+
+Pick two or more people and FaceSort shows only the photos where **every** one
+of them appears. One person selected shows all their photos.
+
+Reachable from the title bar at any time (**Find together**), so you can search
+before or after sorting.
+
+### Why this needed a schema change
+
+There was no `face_records` table to query — `FaceRecord` is a Python dataclass
+(`src/clusterer.py`), and the `persons` table stores one centroid per person plus
+a **capped list of at most 8 sample paths** for display. An intersection over
+those samples would be quietly wrong: a person seen in 47 photos has 8 paths
+recorded, so "photos with Raha and Maryum" would report almost nothing.
+
+So occurrences get their own table — one row per `(person, photo)` pair:
+
+```sql
+CREATE TABLE face_occurrences (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    person_name TEXT NOT NULL COLLATE NOCASE,
+    image_path  TEXT NOT NULL,
+    faces       INTEGER NOT NULL DEFAULT 1,
+    seen_at     TEXT NOT NULL,
+    UNIQUE(person_name, image_path)
+);
+```
+
+`UNIQUE` makes recording idempotent, so re-running a scan converges instead of
+duplicating. It is written whenever a cluster is named, and re-pointed when two
+people are merged.
+
+Occurrences are recorded **as you name people**, which means the relationship
+search only knows about groups from runs where you gave them a name. Renaming a
+group later records the new name; the old name's rows stay (they are a
+different person as far as the DB knows) — delete the database to start clean.
+
+### The query
+
+One grouped pass, not N set intersections in Python:
+
+```sql
+SELECT image_path FROM face_occurrences
+ WHERE person_name IN (?, ?) COLLATE NOCASE
+ GROUP BY image_path
+HAVING COUNT(DISTINCT person_name) = 2;
+```
+
+Measured on this machine with 50,000 rows across 40 people and 8,000 photos:
+
+| Query | Time |
+|-------|------|
+| Intersection, 2 names | ~2 ms |
+| Intersection, 3 names | ~3 ms |
+| One person's photos | ~2 ms |
+| Everyone in one photo | ~0.1 ms |
+| People list (rollup) | ~48 ms |
+| Co-occurrence matrix | ~1.1 s |
+
+`EXPLAIN QUERY PLAN` confirms the intersection runs off
+`idx_occurrences_pair` as a **covering index search**, not a table scan. Three
+indexes back the three access patterns:
+
+- `idx_occurrences_pair(person_name, image_path)` — the intersection
+- `idx_occurrences_image(image_path)` — "who is in this photo"
+- `idx_occurrences_person_rollup(person_name COLLATE NOCASE, faces, seen_at)`
+  — the people list. The explicit collation matters: it matches the
+  `GROUP BY ... COLLATE NOCASE`, so SQLite walks the index in order instead of
+  building a temp b-tree (**205 ms → 48 ms**).
+
+### Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/people_list` | Everyone with recorded photos, for the picker |
+| `GET` | `/intersection?names=John,Mary` | Photos containing **all** of them, plus `count`, `per_person`, and `unknown` for typo feedback |
+| `GET` | `/co_occurrence_matrix` | Pairwise shared-photo counts for the heatmap |
+| `POST` | `/export_intersection` | Copies the matches into a folder. Copies, never moves; never overwrites |
+
+Names are matched case-insensitively, with a case-insensitive prefix match as
+a fallback for a partially typed name. An unmatched name comes back in
+`unknown` so the UI can say *which* name was wrong instead of quietly returning
+fewer photos than you asked for.
+
 ## Desktop app (Electron + Python)
 
 The desktop app is two pieces that meet on a loopback socket:
@@ -595,6 +680,10 @@ gender-age graphs are never called, so they are left out.
 | `GET` | `/clusters` | Every cluster with its faces: photo name, bbox, detection score and a cropped JPEG **data URL** thumbnail |
 | `POST` | `/name_cluster` | Name a group (`name_cluster: {cluster_id, name}`). Empty name → unknown folder; non-empty names are remembered in the SQLite DB for future scans |
 | `POST` | `/merge_clusters` | Link two groups as one person — the manual age bridge. Body `{cluster_a, cluster_b, name?}`; `name` is optional (omit it to link for this run only). Groups the database already knows are one person are re-fused on every scan |
+| `GET` | `/people_list` | Everyone with recorded photos, with their photo counts (for the relationship picker) |
+| `GET` | `/intersection?names=A,B` | Photos containing **every** named person. See [Relationships](#relationships--which-photos-have-them-together) |
+| `GET` | `/co_occurrence_matrix` | Pairwise shared-photo counts, for the heatmap |
+| `POST` | `/export_intersection` | Copies the matching photos into `{output_folder, names}`. Copies rather than moves, and never overwrites an existing file |
 | `POST` | `/organize` | Copies/moves every photo into `output_folder/<person>/` **on a worker thread** — returns `{"started": true, "total": n}`; follow `/status` for per-file progress and read the report from `status.results` |
 | `GET` | `/thumb?name=` | Small (420 px) JPEG of one photo **inside the scanned folder** — the live scan preview. Scoped by design: only a *basename* is accepted and resolved inside the input folder, so the endpoint can never be used to read arbitrary files |
 | `GET` | `/photo?name=` | The same photo at 1600 px, for the review lightbox. Identical scoping; renders are memoised on `(path, mtime, size)` in a 64-entry cache |
@@ -701,6 +790,7 @@ and an untestable code path would be worse than none.
 python tests/test_pipeline.py    # image loader, detector, embedder
 python tests/test_clusterer.py   # clustering, de-duplication, config mapping
 python tests/test_age_invariance.py  # periocular landmarks, fused distance, age pairing
+python tests/test_relationships.py   # occurrence table, intersection, co-occurrence, scale
 python tests/test_organizer.py   # folders, copy/move, name collisions
 python tests/test_names_db.py    # persistent name DB, matching, blending
 python tests/test_preview.py     # thumbnail montage, temp files, viewer
@@ -756,6 +846,7 @@ FaceSort/
 │   ├── test_pipeline.py
 │   ├── test_clusterer.py
 │   ├── test_age_invariance.py
+│   ├── test_relationships.py
 │   ├── test_organizer.py
 │   ├── test_names_db.py
 │   ├── test_preview.py

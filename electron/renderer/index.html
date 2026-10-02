@@ -84,6 +84,13 @@
       <path d="M4 20 15.5 8.5M16.8 7.2 20 10.4M6.5 4.5l1.6 3.4 3.4 1.6-3.4 1.6-1.6 3.4-1.6-3.4L1.5 9.5l3.4-1.6z" stroke-linecap="round" stroke-linejoin="round" />
     </symbol>
     <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round" /></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+    <symbol id="i-users-pair" viewBox="0 0 24 24">
+      <circle cx="8" cy="8.5" r="3" />
+      <path d="M2.5 19c.7-3.2 3-4.8 5.5-4.8s4.8 1.6 5.5 4.8z" />
+      <circle cx="16.5" cy="9.5" r="2.4" />
+      <path d="M15 14.4c2.6 0 4.6 1.4 5.2 4.6h-3.1" />
+    </symbol>
     <symbol id="i-link" viewBox="0 0 24 24">
       <path d="M9.5 14.5 14.5 9.5" stroke-linecap="round" />
       <path d="M13 7.5 15 5.5a3.5 3.5 0 0 1 5 5l-2 2M11 16.5 9 18.5a3.5 3.5 0 0 1-5-5l2-2"
@@ -119,6 +126,11 @@
       </nav>
 
       <div class="bar-right">
+        <button id="goto-relate" class="btn quiet small" type="button"
+                title="Find photos of specific people together">
+          <svg class="icon"><use href="#i-search" /></svg>
+          <span>Find together</span>
+        </button>
         <span class="engine" id="engine-pill" data-state="connecting">
           <i aria-hidden="true"></i><span id="engine-label">connecting</span>
         </span>
@@ -234,6 +246,71 @@
 
       <!-- ---------------------------------------------------- stage --- -->
       <main class="stage" id="stage" tabindex="-1">
+        <!-- RELATIONSHIPS · find photos of these people together ----- -->
+        <section class="view" data-view="relate" aria-label="Find people together" hidden>
+          <div class="sheet relate-sheet">
+            <button class="back-link" id="relate-back" type="button">
+              <svg class="icon"><use href="#i-chevron-right" /></svg> Back
+            </button>
+            <p class="kicker">Relationships</p>
+            <h1 class="display">Which photos have them <em>together</em>?</h1>
+            <p class="lede">
+              Pick two or more people to see only the photos where every one of
+              them appears. Choose a single person to see all their photos.
+            </p>
+
+            <!-- tag input: type to search, Enter or click to add -->
+            <div class="picker" id="picker">
+              <div class="picker-tags" id="picker-tags"></div>
+              <input id="picker-input" type="text" autocomplete="off"
+                     placeholder="Search people…" role="combobox"
+                     aria-expanded="false" aria-controls="picker-list"
+                     aria-autocomplete="list" />
+              <ul class="picker-list" id="picker-list" role="listbox" hidden></ul>
+            </div>
+
+            <div class="relate-actions">
+              <button id="relate-find" class="btn primary" type="button" disabled>
+                <svg class="icon"><use href="#i-search" /></svg>
+                <span id="relate-find-label">Find photos</span>
+              </button>
+              <button id="relate-clear" class="btn quiet" type="button">
+                Clear
+              </button>
+              <button id="relate-export" class="btn quiet" type="button" disabled>
+                <svg class="icon"><use href="#i-copy" /></svg>
+                <span>Export these photos</span>
+              </button>
+            </div>
+
+            <p class="note relate-error" id="relate-error" hidden></p>
+
+            <!-- summary + venn -->
+            <div class="relate-summary" id="relate-summary" hidden>
+              <div class="relate-count">
+                <p class="tnum" id="relate-found">0</p>
+                <p class="micro" id="relate-wording">matching photos</p>
+              </div>
+              <svg class="venn" id="venn" viewBox="0 0 320 180"
+                   role="img" aria-label="Overlap between the selected people"></svg>
+            </div>
+
+            <div class="results" id="relate-results" hidden></div>
+
+            <!-- co-occurrence heatmap -->
+            <section class="heatmap-block" id="heatmap-block" hidden>
+              <div class="heatmap-head">
+                <h2 class="title">Who appears together</h2>
+                <p class="note">
+                  Darker means more shared photos. Click a pair to search for
+                  those two.
+                </p>
+              </div>
+              <div class="heatmap" id="heatmap"></div>
+            </section>
+          </div>
+        </section>
+
         <!-- 1 · CONFIGURE ------------------------------------------- -->
         <section class="view is-active" data-view="configure" aria-label="Configure">
           <div class="sheet">

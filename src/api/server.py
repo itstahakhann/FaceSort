@@ -36,6 +36,7 @@ import base64
 import io
 import logging
 import os
+import shutil
 import socket
 import sys
 import threading
@@ -210,6 +211,13 @@ class OrganizeRequest(BaseModel):
     """Body of ``POST /organize``."""
 
     mode: Optional[str] = Field(None, pattern="^(copy|move)$")
+
+
+class ExportRequest(BaseModel):
+    """Body of ``POST /export_intersection``."""
+
+    output_folder: str
+    names: List[str] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------
@@ -692,6 +700,13 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             db = open_names_db(session.config)
             try:
                 persisted = save_named_cluster(db, cluster, name)
+                # Record which photos this person is actually in. Without this
+                # the relationship/intersection queries have nothing to work
+                # from: the persons table only keeps a capped list of samples.
+                if name:
+                    db.record_occurrences(
+                        name, cluster.image_paths, faces=cluster.size
+                    )
             finally:
                 if db is not None:
                     db.close()
@@ -781,6 +796,192 @@ def create_app(config_path: Optional[Path] = None) -> FastAPI:
             "photos": len(merged.image_paths),
             "name": session.names.get(merged.cluster_id) or "",
             "remembered": persisted,
+        }
+
+    # -- relationships: "which photos contain these people together" -------
+    def _relationship_db():
+        """Open the name DB for a relationship query.
+
+        Falls back to ``base_config`` (config.yaml) because these queries have
+        to work *before* any scan: ``session.config`` is only populated by
+        ``POST /scan``, so without the fallback the endpoints would silently
+        look in the default per-user database and report "nobody named yet"
+        even when config.yaml points somewhere else.
+
+        Returns ``None`` when the DB is disabled or missing, so every endpoint
+        below can degrade to "no data yet" instead of erroring.
+        """
+        merged = dict(base_config)
+        with session._lock:  # noqa: SLF001 - same module, single owner
+            merged.update(session.config)
+        if not merged.get("use_db", True):
+            return None
+        try:
+            return open_names_db(merged)
+        except Exception as exc:  # noqa: BLE001 - a missing DB is not fatal
+            logger.warning("Relationship queries unavailable: %s", exc)
+            return None
+
+    def _split_names(raw: Optional[str]) -> List[str]:
+        """Parse ``?names=A,B,C``, dropping blanks and repeats."""
+        if not raw:
+            return []
+        seen = set()
+        out: List[str] = []
+        for chunk in str(raw).split(","):
+            name = chunk.strip()
+            if not name or name.lower() in seen:
+                continue
+            seen.add(name.lower())
+            out.append(name)
+        return out
+
+    @app.get("/people_list")
+    def people_list() -> Dict[str, Any]:
+        """Everyone with recorded photos, for the relationship picker."""
+        db = _relationship_db()
+        if db is None:
+            return {"people": [], "count": 0, "db": False}
+        try:
+            people = db.get_all_people()
+        finally:
+            db.close()
+        return {"people": people, "count": len(people), "db": True}
+
+    @app.get("/intersection")
+    def intersection(names: str = Query("", max_length=2000)) -> Dict[str, Any]:
+        """Photos containing **every** requested person.
+
+        ``?names=John,Mary`` returns only photos where both appear. A single
+        name returns that person's photos; no names returns everything
+        recorded. Unknown names come back in ``unknown`` so the UI can name the
+        typo instead of quietly showing fewer results.
+        """
+        wanted = _split_names(names)
+        db = _relationship_db()
+        if db is None:
+            return {
+                "names": wanted, "unknown": wanted, "photos": [],
+                "count": 0, "total": 0, "db": False,
+                "error": "The name database is disabled, so there are no "
+                         "recorded photos to search.",
+            }
+        try:
+            matched, unknown = db.resolve_names(wanted)
+            photos = db.get_intersection(matched) if matched else []
+            total = sum(entry["photos"] for entry in db.get_all_people())
+            per_person = {
+                name: len(db.photos_for_person(name)) for name in matched
+            }
+        finally:
+            db.close()
+
+        return {
+            "names": matched,
+            "unknown": unknown,
+            "photos": photos,
+            "count": len(photos),
+            "total": total,
+            "per_person": per_person,
+            "db": True,
+        }
+
+    @app.get("/co_occurrence_matrix")
+    def co_occurrence_matrix() -> Dict[str, Any]:
+        """How often each pair of people appears in the same photo.
+
+        Feeds the heatmap. ``names`` is the full axis; ``pairs`` carries only
+        non-zero cells so the UI does not have to fill a dense n x n grid.
+        """
+        db = _relationship_db()
+        if db is None:
+            return {"names": [], "pairs": [], "max": 0, "db": False}
+        try:
+            people = db.get_all_people()
+            pairs = db.get_co_occurrence()
+        finally:
+            db.close()
+        return {
+            "names": [entry["name"] for entry in people],
+            "pairs": pairs,
+            "max": max((p["photos"] for p in pairs), default=0),
+            "db": True,
+        }
+
+    @app.post("/export_intersection")
+    def export_intersection(request: ExportRequest) -> Dict[str, Any]:
+        """Copy the photos matching an intersection into a new folder.
+
+        Copies rather than moves: the user's originals are never at risk from
+        a search. Names the destination folder after the people involved, so
+        repeated exports do not collide.
+        """
+        folder = Path(request.output_folder).expanduser()
+        if not folder.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Destination folder does not exist: {folder}")
+
+        wanted = [n.strip() for n in request.names if str(n).strip()]
+        db = _relationship_db()
+        if db is None:
+            raise HTTPException(
+                status_code=400,
+                detail="The name database is disabled, so there are nothing "
+                       "to export.")
+        try:
+            matched, unknown = db.resolve_names(wanted)
+            photos = db.get_intersection(matched) if matched else []
+        finally:
+            db.close()
+
+        if not photos:
+            raise HTTPException(
+                status_code=404,
+                detail="No photos match that combination"
+                       + (f" (unknown: {', '.join(unknown)})" if unknown else ""))
+
+        copied = 0
+        skipped: List[str] = []
+        errors: List[List[str]] = []
+        # Occurrences are recorded as absolute paths during a scan, but a
+        # database written by an earlier session can hold paths relative to a
+        # different working directory — resolve those against the folder that
+        # was scanned rather than silently reporting "missing".
+        scan_root = Path(session.config.get("input_folder", ".")).expanduser()
+        for source_text in photos:
+            source = Path(source_text)
+            if not source.is_absolute():
+                source = scan_root / source
+            try:
+                if not source.is_file():
+                    skipped.append(source.name)
+                    continue
+                destination = folder / source.name
+                if destination.exists():
+                    # Never overwrite: a repeated export must not clobber.
+                    stem, suffix = source.stem, source.suffix
+                    index = 1
+                    while destination.exists():
+                        destination = folder / f"{stem}_{index}{suffix}"
+                        index += 1
+                shutil.copy2(source, destination)
+                copied += 1
+            except OSError as exc:
+                errors.append([source.name, str(exc)])
+
+        logger.info(
+            "Exported %d of %d matching photo(s) to %s.",
+            copied, len(photos), folder,
+        )
+        return {
+            "ok": True,
+            "copied": copied,
+            "matched": len(photos),
+            "output_folder": str(folder),
+            "skipped": skipped,
+            "errors": errors,
+            "unknown": unknown,
         }
 
     def _scoped_photo(name: str) -> Path:
