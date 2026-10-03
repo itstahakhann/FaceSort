@@ -23,8 +23,8 @@ it a name, and the link is remembered so future scans group them on their own.
 
 | File | Size | What it is |
 |------|------|------------|
-| `FaceFlow-Setup-1.0.0.exe` | SIZE_SETUP | Installer. Adds FaceFlow to your Start menu. |
-| `FaceFlow-Portable-1.0.0.exe` | SIZE_PORTABLE | Single file. Runs from anywhere, no install. |
+| `FaceFlow-Setup-1.0.0.exe` | 405 MB | Installer. Adds FaceFlow to your Start menu. |
+| `FaceFlow-Portable-1.0.0.exe` | 378 MB | Single file. Runs from anywhere, no install. |
 
 > **These builds are not code-signed.** Windows SmartScreen will show a blue
 > "Windows protected your PC" warning on first run, because it cannot verify an

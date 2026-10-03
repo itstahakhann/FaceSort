@@ -298,7 +298,12 @@ def _release_readme(artifacts: List[Path]) -> str:
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
     names = "\n".join(f"  - {path.name}  ({path.stat().st_size / 1e6:.0f} MB)"
                       for path in artifacts)
-    return f"""FaceSort - release build
+    # Name the real installer in the checksum hint. Hardcoding a filename here
+    # is how this file came to tell people to verify a FaceSort exe after the
+    # product was renamed.
+    installer = next((p.name for p in artifacts if "Setup" in p.name),
+                     "FaceFlow-Setup-1.0.0.exe")
+    return f"""FaceFlow - release build
 Generated {generated}
 {'=' * 60}
 
@@ -309,10 +314,10 @@ WHAT IS HERE
 
 HOW TO CHECK THAT INSTALLATION WORKS
 
-1. The installer  (FaceSort-Setup-*.exe)
+1. The installer  (FaceFlow-Setup-*.exe)
    Double-click it and click through. It installs per-user, so no admin
    rights are needed and nothing goes to Program Files.
-   After it finishes, launch FaceSort from the Start menu.
+   After it finishes, launch FaceFlow from the Start menu.
 
    EXPECTED: a blue progress line in the terminal window it opened, ending
    with something like:
@@ -324,22 +329,31 @@ HOW TO CHECK THAT INSTALLATION WORKS
    self-built release, not a sign that the download is bad.
 
    Verify the copy is intact:
-       certutil -hashfile "FaceSort-Setup-1.0.0.exe" SHA256
+       certutil -hashfile "{installer}" SHA256
    and compare with the same line in SHA256SUMS.txt.
 
-2. The portable exe  (FaceSort-Portable-*.exe)
+2. The portable exe  (FaceFlow-Portable-*.exe)
    Copy it anywhere and double-click it. No install, no registry, no
    uninstaller - delete the file when you are done.
    Use this to confirm the app itself works before trusting the installer.
+   It unpacks itself to a temporary folder on first run, so give it a
+   moment before concluding it has failed to start.
 
 3. Where things go
-   Settings   %APPDATA%\\FaceSort          (Chromium profile, created on run)
-   Names DB   %LOCALAPPDATA%\\FaceSort      (remembered people)
-   Photos     wherever you point it - the app never moves your originals
-               unless you choose Move instead of Copy.
+   Two folders, for two different reasons:
+
+   Profile   %APPDATA%\\FaceFlow         (the window's own settings -
+                theme, recent folders. This path follows the app's name, so a
+                profile from an earlier build is left behind unused.)
+   Names DB  %LOCALAPPDATA%\\FaceSort    (the people you have named.
+                Deliberately unchanged - renaming this path would orphan
+                every remembered name already on disk.)
+
+   Photos go wherever you point them. The app never modifies your originals
+   unless you choose Move instead of Copy.
 
 4. Uninstalling
-   Settings > Apps > Installed apps > FaceSort > Uninstall.
+   Settings > Apps > Installed apps > FaceFlow > Uninstall.
    The portable exe needs no uninstalling. To forget every remembered name,
    delete facesort_names.db from %LOCALAPPDATA%\\FaceSort.
 
