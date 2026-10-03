@@ -299,15 +299,19 @@ function installRendererDiagnostics(webContents) {
   webContents.on('unresponsive', () => log('renderer is unresponsive'));
   webContents.on('responsive', () => log('renderer is responsive again'));
   webContents.on('did-finish-load', () => {
+    // A cheap assertion that the shell actually mounted. It has caught real
+    // load-order and CSP failures, so it stays — but it reports what the
+    // current shell contains rather than a removed layout.
     const probe = `(() => {
       const el = (id) => document.getElementById(id);
+      const active = document.querySelector('.view.is-active');
       return JSON.stringify({
         title: document.title,
         bridge: typeof window.faceorg,
-        cards: document.querySelectorAll('.card').length,
-        sidebar: !!(el('scan') && el('input-folder')),
-        emptyShown: el('empty-state') ? !el('empty-state').hidden : null,
-        toast: el('toast') ? el('toast').textContent : null,
+        shell: !!(el('nav') && el('pane') && el('engine-chip')),
+        view: active ? active.dataset.section : null,
+        sections: [...document.querySelectorAll('#nav .nav-item')].length,
+        theme: document.documentElement.dataset.theme,
         enginePort: (window.faceorg && window.faceorg.ready()) ? 'ready' : 'waiting'
       });
     })()`;
@@ -325,7 +329,7 @@ function createWindow() {
     minHeight: 680,
     show: false,
     backgroundColor: '#0f1115',
-    title: 'FaceSort',
+    title: 'FaceFlow',
     icon: path.join(__dirname, 'build', 'icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -389,7 +393,7 @@ function buildMenu() {
           label: 'About',
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
-            title: 'FaceSort',
+            title: 'FaceFlow',
             message: `FaceSort ${app.getVersion()}`,
             detail:
               'Groups the faces in your photos and sorts them into named ' +

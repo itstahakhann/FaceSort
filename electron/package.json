@@ -1,9 +1,9 @@
 {
-  "name": "facesort-desktop",
-  "productName": "FaceSort",
+  "name": "faceflow-desktop",
+  "productName": "FaceFlow",
   "version": "1.0.0",
   "private": true,
-  "description": "Offline face grouping & photo auto-organizer. Electron shell around a local Python engine.",
+  "description": "Private photo organization, powered locally. Groups photos by whose face is in them, entirely on-device.",
   "author": "FaceSort contributors",
   "license": "MIT",
   "main": "main.js",
@@ -21,9 +21,9 @@
     "electron-builder": "^26.15.3"
   },
   "build": {
-    "appId": "org.facesort.app",
-    "productName": "FaceSort",
-    "copyright": "Copyright © 2026",
+    "appId": "org.faceflow.app",
+    "productName": "FaceFlow",
+    "copyright": "Copyright \u00a9 2026",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -54,7 +54,7 @@
           ]
         }
       ],
-      "artifactName": "FaceSort-Setup-${version}.${ext}"
+      "artifactName": "FaceFlow-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -62,10 +62,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "FaceSort"
+      "shortcutName": "FaceFlow"
     },
     "portable": {
-      "artifactName": "FaceSort-Portable-${version}.${ext}"
+      "artifactName": "FaceFlow-Portable-${version}.${ext}"
     }
   }
 }

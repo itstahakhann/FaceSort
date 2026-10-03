@@ -2,20 +2,60 @@
 <html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
+  <!-- Offline by construction: no remote origin is permitted at all. `img-src
+       data:` is what lets the engine's inline face thumbnails render. -->
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src http://127.0.0.1:*; font-src 'self'; form-action 'none'; base-uri 'none';" />
-  <title>FaceSort</title>
-  <link rel="stylesheet" href="styles.css" />
+  <title>FaceFlow</title>
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/components.css" />
+  <link rel="stylesheet" href="styles/shell.css" />
+  <link rel="stylesheet" href="styles/views.css" />
 </head>
 <body>
-  <!-- ===================================================== icon sprite ====
-       Inline SVG instead of an icon webfont: the app is offline and the
-       CSP forbids remote stylesheets, so icons are bundled as symbols. -->
+  <a class="skip-link" href="#pane">Skip to content</a>
+
+  <!-- Inline SVG sprite rather than an icon webfont: the app never touches the
+       network and the CSP forbids remote stylesheets. -->
   <svg class="sprite" aria-hidden="true" focusable="false">
     <symbol id="i-logo" viewBox="0 0 24 24">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <circle cx="12" cy="9.5" r="3.4" />
-      <path d="M5.6 19.4c1-3.4 3.6-5 6.4-5s5.4 1.6 6.4 5z" />
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <circle cx="9" cy="10" r="2.2" />
+      <path d="M3.6 17.4c.7-2.8 2.9-4.2 5.4-4.2s4.7 1.4 5.4 4.2" />
+      <path d="M15.5 9.6a2.2 2.2 0 0 1 0 3.9" />
+    </symbol>
+    <symbol id="i-home" viewBox="0 0 24 24">
+      <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-users" viewBox="0 0 24 24">
+      <circle cx="9" cy="8.5" r="3.2" />
+      <path d="M3 19.5c.8-3.4 3.3-5.1 6-5.1s5.2 1.7 6 5.1z" />
+      <path d="M15.6 6.1a3.2 3.2 0 0 1 0 5.8M17 14.6c2.1.5 3.5 2 4 4.4" />
+    </symbol>
+    <symbol id="i-image" viewBox="0 0 24 24">
+      <rect x="3.5" y="5" width="17" height="14" rx="2" />
+      <circle cx="9" cy="10" r="1.5" />
+      <path d="m4.5 17.5 4.6-4.2 3.2 2.8 2.6-2.3 4.6 4" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-link" viewBox="0 0 24 24">
+      <path d="M9.5 14.5 14.5 9.5" stroke-linecap="round" />
+      <path d="M13 7.5 15 5.5a3.5 3.5 0 0 1 5 5l-2 2M11 16.5 9 18.5a3.5 3.5 0 0 1-5-5l2-2"
+            stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24">
+      <path d="M4 8.5h3l1.4-2h7.2l1.4 2h3a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 20 18.5H4A1.5 1.5 0 0 1 2.5 17v-7A1.5 1.5 0 0 1 4 8.5z" />
+      <circle cx="12" cy="13" r="3.2" />
+    </symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 14.5a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.4 1z" />
+    </symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24">
+      <path d="M3 12h4l3-8 4 16 3-8h4" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" stroke-linecap="round" />
     </symbol>
     <symbol id="i-folder" viewBox="0 0 24 24">
       <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.2a2 2 0 0 1 1.5.7l1 1.2h7.3A2.5 2.5 0 0 1 21 9.4v7.1a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z" />
@@ -23,19 +63,6 @@
     <symbol id="i-folder-open" viewBox="0 0 24 24">
       <path d="M3 8V6.5A2.5 2.5 0 0 1 5.5 4h3.1a2 2 0 0 1 1.5.7l1 1.2h7.4A2.5 2.5 0 0 1 21 8.4v.6H3z" />
       <path d="M3.2 10h18.3l-1.7 8.1a2 2 0 0 1-2 1.7H5.4a2 2 0 0 1-2-2.2z" />
-    </symbol>
-    <symbol id="i-search" viewBox="0 0 24 24">
-      <circle cx="10.5" cy="10.5" r="6" /><path d="m15 15 5 5" stroke-linecap="round" />
-    </symbol>
-    <symbol id="i-users" viewBox="0 0 24 24">
-      <circle cx="9" cy="8.5" r="3.2" />
-      <path d="M3 19.5c.8-3.4 3.3-5.1 6-5.1s5.2 1.7 6 5.1z" />
-      <path d="M15.5 6.2a3 3 0 0 1 0 5.6M17 14.9c2.2.5 3.6 2.1 4 4.6" />
-    </symbol>
-    <symbol id="i-image" viewBox="0 0 24 24">
-      <rect x="3.5" y="5" width="17" height="14" rx="2" />
-      <circle cx="9" cy="10" r="1.5" />
-      <path d="m4.5 17.5 4.6-4.2 3.2 2.8 2.6-2.3 4.6 4" />
     </symbol>
     <symbol id="i-check" viewBox="0 0 24 24">
       <path d="m5 12.5 4.5 4.5L19 7.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -45,6 +72,16 @@
       <path d="M12 4.5 21 19.5H3z" stroke-linejoin="round" />
       <path d="M12 10v4.2" stroke-linecap="round" /><circle cx="12" cy="17" r=".9" />
     </symbol>
+    <symbol id="i-info" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 11v5.5" stroke-linecap="round" /><circle cx="12" cy="8" r=".9" />
+    </symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9.5 6 6 6-6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24">
+      <path d="M19 12H5M11 6l-6 6 6 6" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
     <symbol id="i-sun" viewBox="0 0 24 24">
       <circle cx="12" cy="12" r="4.2" />
       <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5" stroke-linecap="round" />
@@ -52,595 +89,145 @@
     <symbol id="i-moon" viewBox="0 0 24 24">
       <path d="M20 14.5A8.2 8.2 0 0 1 9.5 4 8.3 8.3 0 1 0 20 14.5z" />
     </symbol>
-    <symbol id="i-sliders" viewBox="0 0 24 24">
-      <path d="M4 7h10M18 7h2M4 12h3M11 12h9M4 17h8M16 17h4" stroke-linecap="round" />
-      <circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="14" cy="17" r="2" />
-    </symbol>
     <symbol id="i-copy" viewBox="0 0 24 24">
       <rect x="9" y="9" width="11" height="11" rx="2" />
       <path d="M15 6.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h.5" />
     </symbol>
     <symbol id="i-move" viewBox="0 0 24 24">
-      <path d="M12 3v18M3 12h18M12 3 9.5 5.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5" stroke-linecap="round" stroke-linejoin="round" />
-    </symbol>
-    <symbol id="i-refresh" viewBox="0 0 24 24">
-      <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5" stroke-linecap="round" stroke-linejoin="round" />
-    </symbol>
-    <symbol id="i-terminal" viewBox="0 0 24 24">
-      <rect x="3" y="4.5" width="18" height="15" rx="2" />
-      <path d="m7.5 10 2.5 2.2-2.5 2.2M12.8 15h3.7" stroke-linecap="round" stroke-linejoin="round" />
-    </symbol>
-    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="m6 14.5 6-6 6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
-    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 6 6 6-6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
-    <symbol id="i-flip" viewBox="0 0 24 24">
-      <path d="M4 8a8 8 0 0 1 13.7-4.2M20 16a8 8 0 0 1-13.7 4.2" stroke-linecap="round" />
-      <path d="M18 2.5V8h-5.5M6 21.5V16h5.5" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M12 3v18M3 12h18M12 3 9.5 5.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l2.5 2.5" stroke-linecap="round" stroke-linejoin="round" />
     </symbol>
     <symbol id="i-tag" viewBox="0 0 24 24">
       <path d="M4 11.2V5.5A1.5 1.5 0 0 1 5.5 4h5.7a2 2 0 0 1 1.4.6l7 7a2 2 0 0 1 0 2.8l-5.7 5.7a2 2 0 0 1-2.8 0l-7-7A2 2 0 0 1 4 11.2z" />
       <circle cx="8.6" cy="8.6" r="1.3" />
     </symbol>
-    <symbol id="i-party" viewBox="0 0 24 24">
-      <path d="M4 20 15.5 8.5M16.8 7.2 20 10.4M6.5 4.5l1.6 3.4 3.4 1.6-3.4 1.6-1.6 3.4-1.6-3.4L1.5 9.5l3.4-1.6z" stroke-linecap="round" stroke-linejoin="round" />
+    <symbol id="i-merge" viewBox="0 0 24 24">
+      <path d="M6 20V10a4 4 0 0 1 4-4h8" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="m15 3 3 3-3 3" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M12 20h6" stroke-linecap="round" />
     </symbol>
-    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round" /></symbol>
-    <symbol id="i-camera" viewBox="0 0 24 24">
-      <path d="M4 8.5h3l1.4-2h7.2l1.4 2h3a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 20 18.5H4A1.5 1.5 0 0 1 2.5 17v-7A1.5 1.5 0 0 1 4 8.5z"/>
-      <circle cx="12" cy="13" r="3.2" />
+    <symbol id="i-split" viewBox="0 0 24 24">
+      <path d="M18 20V10a4 4 0 0 0-4-4H6" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="m9 3-3 3 3 3" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M12 20h6" stroke-linecap="round" />
+    </symbol>
+    <symbol id="i-scan" viewBox="0 0 24 24">
+      <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" stroke-linecap="round" />
+      <circle cx="12" cy="12" r="3.2" />
+    </symbol>
+    <symbol id="i-download" viewBox="0 0 24 24">
+      <path d="M12 4v11M8 11.5l4 4 4-4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M4.5 19.5h15" stroke-linecap="round" />
+    </symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24">
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1.5" />
+      <rect x="3.5" y="13.5" width="7" height="7" rx="1.5" />
+      <rect x="13.5" y="13.5" width="7" height="7" rx="1.5" />
+    </symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24">
+      <path d="M4 6h16M6.5 12h11M9.5 18h5" stroke-linecap="round" />
     </symbol>
     <symbol id="i-eye" viewBox="0 0 24 24">
-      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" stroke-linejoin="round"/>
+      <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" stroke-linejoin="round" />
       <circle cx="12" cy="12" r="3" />
     </symbol>
-    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M14.5 6 8.5 12l6 6" stroke-linecap="round" stroke-linejoin="round" /></symbol>
-    <symbol id="i-users-pair" viewBox="0 0 24 24">
-      <circle cx="8" cy="8.5" r="3" />
-      <path d="M2.5 19c.7-3.2 3-4.8 5.5-4.8s4.8 1.6 5.5 4.8z" />
-      <circle cx="16.5" cy="9.5" r="2.4" />
-      <path d="M15 14.4c2.6 0 4.6 1.4 5.2 4.6h-3.1" />
+    <symbol id="i-refresh" viewBox="0 0 24 24">
+      <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5" stroke-linecap="round" stroke-linejoin="round" />
     </symbol>
-    <symbol id="i-link" viewBox="0 0 24 24">
-      <path d="M9.5 14.5 14.5 9.5" stroke-linecap="round" />
-      <path d="M13 7.5 15 5.5a3.5 3.5 0 0 1 5 5l-2 2M11 16.5 9 18.5a3.5 3.5 0 0 1-5-5l2-2"
-            stroke-linecap="round" stroke-linejoin="round" />
+    <symbol id="i-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 1.8" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24">
+      <path d="M12 3.5 13.7 9l5.5 1.7-5.5 1.7L12 18l-1.7-5.6L4.8 10.7 10.3 9z" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24">
+      <path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z" stroke-linejoin="round" />
+      <path d="m9 12 2 2 4-4" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-sun-moon" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="4.2" />
+      <path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.5 1.5M17.1 17.1l1.5 1.5M18.6 5.4l-1.5 1.5M6.9 17.1l-1.5 1.5" stroke-linecap="round" />
     </symbol>
   </svg>
 
-  <!-- ========================================================= shell ==== -->
-  <div class="app" id="app">
-    <header class="bar">
-      <button class="icon-btn only-narrow" id="drawer-toggle" type="button"
-              aria-label="Show settings" aria-expanded="false">
-        <svg class="icon"><use href="#i-menu" /></svg>
-      </button>
-
-      <div class="identity">
-        <span class="mark" aria-hidden="true"><svg class="icon"><use href="#i-logo" /></svg></span>
-        <span class="identity-text">
-          <strong>FaceSort</strong>
-          <span class="micro">Offline · local only</span>
+  <div class="app">
+    <!-- ============================================================ sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg class="icon"><use href="#i-logo" /></svg>
+        </span>
+        <span class="brand-text">
+          <span class="brand-name">FaceFlow</span>
+          <span class="brand-tag">Private photo organization</span>
         </span>
       </div>
 
-      <!-- progress reads as one continuous rule, not four separate chips -->
-      <nav class="progress" aria-label="Progress">
-        <div class="progress-rail" aria-hidden="true"><span class="progress-fill" id="progress-fill"></span></div>
-        <ol class="progress-steps">
-          <li class="pstep" data-step="configure"><i>1</i><span>Configure</span></li>
-          <li class="pstep" data-step="scanning"><i>2</i><span>Scan</span></li>
-          <li class="pstep" data-step="review"><i>3</i><span>Review</span></li>
-          <li class="pstep" data-step="done"><i>4</i><span>Finish</span></li>
-        </ol>
-      </nav>
+      <nav class="nav" id="nav" aria-label="Sections"></nav>
 
-      <div class="bar-right">
-        <button id="goto-relate" class="btn quiet small" type="button"
-                title="Find photos of specific people together">
-          <svg class="icon"><use href="#i-search" /></svg>
-          <span>Find together</span>
-        </button>
-        <span class="engine" id="engine-pill" data-state="connecting">
-          <i aria-hidden="true"></i><span id="engine-label">connecting</span>
-        </span>
-        <button class="icon-btn" id="theme-toggle" type="button"
-                aria-label="Switch theme" title="Switch theme">
-          <svg class="icon theme-icon-dark"><use href="#i-sun" /></svg>
-          <svg class="icon theme-icon-light"><use href="#i-moon" /></svg>
-        </button>
-      </div>
-    </header>
-
-    <div class="body">
-      <!-- ------------------------------------------------- rail --- -->
-      <aside class="rail" id="sidebar">
-        <!-- Settings are hairline-separated groups, not stacked boxes. -->
-        <section class="group">
-          <h2 class="eyebrow">Input &amp; output</h2>
-          <div class="field">
-            <label class="label" for="input-folder">Photo folder</label>
-            <div class="row">
-              <input id="input-folder" type="text" spellcheck="false"
-                     placeholder="C:\Pictures\family" autocomplete="off" />
-              <button class="icon-btn ghost" id="pick-input" type="button"
-                      aria-label="Choose input folder" title="Choose input folder">
-                <svg class="icon"><use href="#i-folder-open" /></svg>
-              </button>
-            </div>
-          </div>
-          <div class="field">
-            <label class="label" for="output-folder">Destination</label>
-            <div class="row">
-              <input id="output-folder" type="text" spellcheck="false"
-                     placeholder="C:\Pictures\sorted" autocomplete="off" />
-              <button class="icon-btn ghost" id="pick-output" type="button"
-                      aria-label="Choose output folder" title="Choose output folder">
-                <svg class="icon"><use href="#i-folder-open" /></svg>
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section class="group">
-          <h2 class="eyebrow">Grouping</h2>
-          <div class="field">
-            <label class="label" for="tolerance">
-              Tolerance <output id="tolerance-value" class="tnum">0.50</output>
-            </label>
-            <input id="tolerance" type="range" min="0.20" max="1.00" step="0.05" value="0.50" />
-            <p class="note">Higher groups more faces together.</p>
-          </div>
-          <div class="field two-up">
-            <div>
-              <label class="label" for="min-faces">Min faces</label>
-              <input id="min-faces" type="number" min="1" max="50" step="1" value="2" />
-            </div>
-            <div>
-              <label class="label" for="workers">Workers</label>
-              <input id="workers" type="number" min="0" max="16" step="1" value="0" />
-              <p class="note">0 = auto</p>
-            </div>
-          </div>
-        </section>
-
-        <section class="group">
-          <h2 class="eyebrow">When sorting</h2>
-          <div class="segmented" role="radiogroup" aria-labelledby="mode-label">
-            <span class="sr-only" id="mode-label">Copy or move originals</span>
-            <button type="button" class="seg is-active" data-mode="copy"
-                    role="radio" aria-checked="true">
-              <svg class="icon"><use href="#i-copy" /></svg> Copy
-            </button>
-            <button type="button" class="seg" data-mode="move"
-                    role="radio" aria-checked="false">
-              <svg class="icon"><use href="#i-move" /></svg> Move
-            </button>
-          </div>
-        </section>
-
-        <!-- The one action that belongs to this view. -->
-        <div class="rail-cta">
-          <button id="scan" class="btn primary" type="button">
-            <svg class="icon"><use href="#i-search" /></svg>
-            <span id="scan-label">Scan photos</span>
+      <div class="activity">
+        <div class="activity-head">
+          <span class="eyebrow">Recent activity</span>
+          <button class="btn btn-ghost btn-icon btn-sm" id="activity-clear"
+                  type="button" aria-label="Clear activity" title="Clear activity">
+            <svg class="icon icon-sm"><use href="#i-x" /></svg>
           </button>
         </div>
+        <div class="activity-list scroll-area" id="activity-list"></div>
+      </div>
 
-        <section class="group" id="mini-progress" hidden>
-          <div class="meter">
-            <div class="meter-head">
-              <span id="mini-label">Working…</span>
-              <span class="tnum" id="mini-count">0 / 0</span>
-            </div>
-            <div class="meter-rail"><span class="meter-fill" id="mini-bar"></span></div>
-          </div>
-        </section>
+      <div class="sidebar-foot">
+        <button class="foot-item" id="nav-settings" type="button">
+          <svg class="icon"><use href="#i-settings" /></svg>
+          <span>Settings</span>
+        </button>
+        <!-- The privacy claim, stated rather than implied. -->
+        <div class="offline-chip" id="offline-chip" role="status">
+          <span class="dot" aria-hidden="true"></span>
+          <span>Offline · local only</span>
+        </div>
+      </div>
+    </aside>
 
-        <section class="group" id="summary-panel" hidden>
-          <h2 class="eyebrow">Last run</h2>
-          <dl class="facts" id="summary"></dl>
-        </section>
+    <!-- ============================================================ content -->
+    <div class="content">
+      <header class="topbar">
+        <div class="topbar-heading">
+          <h1 class="topbar-title" id="page-title">Overview</h1>
+          <p class="topbar-sub" id="page-sub"></p>
+        </div>
+        <div class="topbar-actions">
+          <span class="engine-chip" id="engine-chip" data-state="connecting">
+            <span class="dot" aria-hidden="true"></span>
+            <span id="engine-label">starting</span>
+          </span>
+          <button class="btn btn-ghost btn-icon" id="theme-toggle" type="button"
+                  aria-label="Switch to light theme" title="Switch to light theme">
+            <svg class="icon" id="theme-icon"><use href="#i-sun" /></svg>
+          </button>
+        </div>
+      </header>
 
-        <section class="group" id="log-panel" hidden>
-          <h2 class="eyebrow">
-            Engine log
-            <button id="log-toggle" class="icon-btn ghost small" type="button"
-                    aria-label="Hide engine log" title="Hide engine log">
-              <svg class="icon"><use href="#i-chevron-up" /></svg>
-            </button>
-          </h2>
-          <pre id="log" class="log" hidden></pre>
-        </section>
-      </aside>
-
-      <!-- ---------------------------------------------------- stage --- -->
-      <main class="stage" id="stage" tabindex="-1">
-        <!-- RELATIONSHIPS · find photos of these people together ----- -->
-        <section class="view" data-view="relate" aria-label="Find people together" hidden>
-          <div class="sheet relate-sheet">
-            <button class="back-link" id="relate-back" type="button">
-              <svg class="icon"><use href="#i-chevron-right" /></svg> Back
-            </button>
-            <p class="kicker">Relationships</p>
-            <h1 class="display">Which photos have them <em>together</em>?</h1>
-            <p class="lede">
-              Pick two or more people to see only the photos where every one of
-              them appears. Choose a single person to see all their photos.
-            </p>
-
-            <!-- tag input: type to search, Enter or click to add -->
-            <div class="picker" id="picker">
-              <div class="picker-tags" id="picker-tags"></div>
-              <input id="picker-input" type="text" autocomplete="off"
-                     placeholder="Search people…" role="combobox"
-                     aria-expanded="false" aria-controls="picker-list"
-                     aria-autocomplete="list" />
-              <ul class="picker-list" id="picker-list" role="listbox" hidden></ul>
-            </div>
-
-            <div class="relate-actions">
-              <button id="relate-find" class="btn primary" type="button" disabled>
-                <svg class="icon"><use href="#i-search" /></svg>
-                <span id="relate-find-label">Find photos</span>
-              </button>
-              <button id="relate-clear" class="btn quiet" type="button">
-                Clear
-              </button>
-              <button id="relate-export" class="btn quiet" type="button" disabled>
-                <svg class="icon"><use href="#i-copy" /></svg>
-                <span>Export these photos</span>
-              </button>
-            </div>
-
-            <p class="note relate-error" id="relate-error" hidden></p>
-
-            <!-- summary + venn -->
-            <div class="relate-summary" id="relate-summary" hidden>
-              <div class="relate-count">
-                <p class="tnum" id="relate-found">0</p>
-                <p class="micro" id="relate-wording">matching photos</p>
-              </div>
-              <svg class="venn" id="venn" viewBox="0 0 320 180"
-                   role="img" aria-label="Overlap between the selected people"></svg>
-            </div>
-
-            <div class="results" id="relate-results" hidden></div>
-
-            <!-- co-occurrence heatmap -->
-            <section class="heatmap-block" id="heatmap-block" hidden>
-              <div class="heatmap-head">
-                <h2 class="title">Who appears together</h2>
-                <p class="note">
-                  Darker means more shared photos. Click a pair to search for
-                  those two.
-                </p>
-              </div>
-              <div class="heatmap" id="heatmap"></div>
-            </section>
-          </div>
-        </section>
-
-        <!-- 1 · CONFIGURE ------------------------------------------- -->
-        <section class="view is-active" data-view="configure" aria-label="Configure">
-          <div class="sheet">
-            <p class="kicker">Step one</p>
-            <h1 class="display">Point it at a folder.<br />It finds the people.</h1>
-            <p class="lede">
-              FaceSort groups photos by whose face is in them, then files each
-              one into a folder named after that person. Nothing is uploaded,
-              and no face or name ever leaves this machine.
-            </p>
-
-            <!-- Not a dashed pill-box: a full-width target with a hard edge
-                 that only lifts on interaction. -->
-            <div class="target" id="dropzone" tabindex="0" role="button"
-                 aria-label="Choose or drop the folder with your photos">
-              <svg class="icon target-icon" aria-hidden="true"><use href="#i-folder-open" /></svg>
-              <div class="target-text">
-                <strong>Drop a photo folder here</strong>
-                <span>or <span class="link">browse</span> for one</span>
-              </div>
-              <span class="target-chosen" id="dropzone-chosen"></span>
-            </div>
-
-            <ul class="facts-row">
-              <li><b>Automatic</b><span>Same person, same folder</span></li>
-              <li><b>You decide</b><span>Name or skip every group</span></li>
-              <li><b>Offline</b><span>No upload, ever</span></li>
-            </ul>
-          </div>
-        </section>
-
-        <!-- 2 · SCANNING --------------------------------------------- -->
-        <section class="view" data-view="scanning" aria-label="Scanning" hidden>
-          <div class="sheet scan-sheet">
-            <p class="kicker">Step two</p>
-            <!-- The number is the hero. Everything else is quiet. -->
-            <p class="readout">
-              <span class="readout-value tnum" id="scan-percent">0%</span>
-            </p>
-            <p class="scan-status">
-              <span class="beat" aria-hidden="true"></span>
-              <span id="scan-text">Preparing…</span>
-            </p>
-
-            <div class="meter-rail tall" role="progressbar" aria-valuemin="0"
-                 aria-valuemax="100" aria-valuenow="0" id="scan-bar-wrap">
-              <span class="meter-fill accent" id="scan-bar"></span>
-            </div>
-
-            <figure class="preview">
-              <img id="preview-img" alt="" decoding="async" />
-              <figcaption class="micro" id="preview-name">—</figcaption>
-            </figure>
-
-            <!-- A filmstrip of what has just been read. Proof of work, and it
-                 makes a long scan feel like it is moving. -->
-            <div class="strip" id="scan-strip" aria-hidden="true"></div>
-
-            <ul class="stat-strip" id="scan-stats"></ul>
-          </div>
-        </section>
-
-        <!-- 3 · REVIEW ----------------------------------------------- -->
-        <section class="view" data-view="review" aria-label="Review groups" hidden>
-
-          <!-- Sorting takes over this screen once naming is done. The count is
-               the hero, the folders appear as they are created, and each photo
-               flies from the pile into the one it belongs to. -->
-          <div class="sort-stage" id="sort-stage" hidden>
-            <p class="kicker">Step four</p>
-            <p class="readout">
-              <span class="readout-value tnum" id="sort-percent">0%</span>
-            </p>
-            <p class="scan-status">
-              <span class="beat" aria-hidden="true"></span>
-              <span id="sort-text">Creating folders.</span>
-            </p>
-            <div class="meter-rail tall" role="progressbar" aria-valuemin="0"
-                 aria-valuemax="100" aria-valuenow="0" id="sort-bar-wrap">
-              <span class="meter-fill accent" id="sort-bar"></span>
-            </div>
-
-            <div class="sortzone" id="sortzone">
-              <div class="sort-src" id="sort-src"></div>
-              <div class="sort-fold" id="sort-fold"></div>
-            </div>
-          </div>
-
-          <div class="sheet-bar">
-            <div class="sheet-bar-text">
-              <p class="kicker">Step three</p>
-              <h2 class="title">Name each group</h2>
-            </div>
-            <div class="sheet-bar-actions">
-              <div class="search">
-                <svg class="icon" aria-hidden="true"><use href="#i-search" /></svg>
-                <input id="cluster-search" type="search" placeholder="Filter by name"
-                       aria-label="Filter groups by name" />
-              </div>
-              <!-- Manual age bridge: pick two groups, assert they are one person. -->
-              <button id="link-toggle" class="btn quiet" type="button"
-                      aria-pressed="false">
-                <svg class="icon"><use href="#i-link" /></svg>
-                <span>Same person?</span>
-              </button>
-              <label class="switch">
-                <input type="checkbox" id="auto-celebrate" checked />
-                <span class="switch-track" aria-hidden="true"></span>
-                <span class="micro">Confetti</span>
-              </label>
-              <!-- The goal action lives with the work, at full strength. -->
-              <button id="organize" class="btn primary" type="button" disabled>
-                <svg class="icon"><use href="#i-folder" /></svg>
-                <span id="organize-label">Sort into folders</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- merge tray: appears only in link mode -->
-          <div class="merge-tray" id="merge-tray" hidden>
-            <div class="merge-slots">
-              <div class="merge-slot" id="merge-slot-a" data-slot="a">
-                <span class="eyebrow">First group</span>
-                <span class="merge-slot-empty">Select a group</span>
-              </div>
-              <svg class="icon merge-link" aria-hidden="true"><use href="#i-link" /></svg>
-              <div class="merge-slot" id="merge-slot-b" data-slot="b">
-                <span class="eyebrow">Second group</span>
-                <span class="merge-slot-empty">Select a group</span>
-              </div>
-            </div>
-            <div class="merge-bar">
-              <div class="merge-name">
-                <label class="label" for="merge-name">Who is it?</label>
-                <input id="merge-name" type="text" autocomplete="off"
-                       placeholder="Leave blank to link for this run only" />
-              </div>
-              <button id="merge-cancel" class="btn quiet" type="button">Cancel</button>
-              <button id="merge-confirm" class="btn primary" type="button" disabled>
-                <svg class="icon"><use href="#i-check" /></svg>
-                <span>Link groups</span>
-              </button>
-            </div>
-            <p class="note merge-hint">
-              Use this when one person appears in two groups — usually a
-              childhood photo and an adult one. Naming them here also
-              remembers the link, so future scans group them on their own.
-            </p>
-          </div>
-
-          <div class="clusters" id="clusters"></div>
-        </section>
-
-        <!-- 4 · DONE ------------------------------------------------ -->
-        <section class="view" data-view="done" aria-label="Finished" hidden>
-          <div class="sheet finish">
-            <div class="success-mark" aria-hidden="true">
-              <svg viewBox="0 0 72 72" class="check">
-                <circle class="check-circle" cx="36" cy="36" r="32" />
-                <path class="check-tick" d="M22 37.5 32.5 48 51 27" />
-              </svg>
-            </div>
-            <h1 class="display small">All sorted</h1>
-            <p class="lede center" id="done-sub">Your photos are in their new folders.</p>
-
-            <dl class="tally" id="done-stats"></dl>
-            <ul class="ledger" id="folder-list"></ul>
-
-            <div class="finish-actions">
-              <button class="btn primary" id="done-open" type="button">
-                <svg class="icon"><use href="#i-folder-open" /></svg> Open output folder
-              </button>
-              <button class="btn quiet" id="done-again" type="button">
-                <svg class="icon"><use href="#i-refresh" /></svg> Scan another folder
-              </button>
-              <button class="btn quiet" id="done-celebrate" type="button">
-                <svg class="icon"><use href="#i-party" /></svg> Celebrate
-              </button>
-            </div>
-
-            <!-- ---------------------------------------------- gallery -- -->
-            <section class="gallery-panel" id="gallery-panel">
-              <div class="gallery-head">
-                <p class="kicker">Bonus</p>
-                <h2 class="title">Build a photo gallery website</h2>
-                <p class="note gallery-lede">
-                  A folder you can email, zip or put on a stick. It opens in any
-                  browser with no internet, and has a full-screen viewer.
-                </p>
-              </div>
-
-              <div class="field">
-                <span class="label">Include</span>
-                <div class="segmented" role="radiogroup" aria-label="Who to include">
-                  <button type="button" class="seg is-active" data-gal-mode="all"
-                          role="radio" aria-checked="true">Everyone</button>
-                  <button type="button" class="seg" data-gal-mode="people"
-                          role="radio" aria-checked="false">Only some people</button>
-                </div>
-              </div>
-
-              <div class="field" id="gal-people-field" hidden>
-                <span class="label">People</span>
-                <div class="people-picker" id="gal-people"></div>
-                <p class="note" id="gal-people-empty">Nobody has been named yet.</p>
-              </div>
-
-              <div class="field">
-                <label class="label" for="gal-password">Password (optional)</label>
-                <div class="row">
-                  <input id="gal-password" type="password" autocomplete="new-password"
-                         placeholder="Leave empty for no password" />
-                  <button class="icon-btn" id="gal-password-toggle" type="button"
-                          aria-label="Show password" title="Show password">
-                    <svg class="icon"><use href="#i-eye" /></svg>
-                  </button>
-                </div>
-                <p class="note">
-                  A simple gate, not encryption — the photos sit in the folder
-                  and anyone technical can open them directly.
-                </p>
-              </div>
-
-              <label class="check">
-                <input type="checkbox" id="gal-thumbs" checked />
-                <span class="check-box" aria-hidden="true">
-                  <svg class="icon"><use href="#i-check" /></svg>
-                </span>
-                <span>Make smaller thumbnails
-                  <small class="micro">Recommended — much faster to browse</small>
-                </span>
-              </label>
-
-              <div class="field">
-                <span class="label">Save to</span>
-                <div class="row">
-                  <input id="gal-path" type="text" spellcheck="false"
-                         placeholder="Choose a folder for the gallery" />
-                  <button class="icon-btn" id="gal-pick" type="button"
-                          aria-label="Choose a folder" title="Choose a folder">
-                    <svg class="icon"><use href="#i-folder-open" /></svg>
-                  </button>
-                </div>
-              </div>
-
-              <p class="note gallery-error" id="gal-error" hidden></p>
-
-              <div class="gallery-progress" id="gal-progress" hidden>
-                <div class="meter-head">
-                  <span id="gal-progress-label">Building…</span>
-                  <span class="tnum" id="gal-progress-count">0 / 0</span>
-                </div>
-                <div class="meter-rail"><span class="meter-fill accent" id="gal-bar"></span></div>
-              </div>
-
-              <div class="gallery-actions">
-                <button class="btn primary" id="gal-build" type="button">
-                  <svg class="icon"><use href="#i-camera" /></svg> Generate gallery
-                </button>
-              </div>
-
-              <div class="gallery-done" id="gal-done" hidden>
-                <div class="success-mark small" aria-hidden="true">
-                  <svg viewBox="0 0 72 72" class="check">
-                    <circle class="check-circle" cx="36" cy="36" r="32" />
-                    <path class="check-tick" d="M22 37.5 32.5 48 51 27" />
-                  </svg>
-                </div>
-                <p class="title" id="gal-done-title">Gallery generated</p>
-                <p class="note" id="gal-done-path"></p>
-                <p class="note" id="gal-done-stats"></p>
-                <div class="gallery-done-actions">
-                  <button class="btn primary" id="gal-open" type="button">
-                    <svg class="icon"><use href="#i-folder-open" /></svg> Open in browser
-                  </button>
-                  <button class="btn quiet" id="gal-open-folder" type="button">
-                    <svg class="icon"><use href="#i-folder" /></svg> Show folder
-                  </button>
-                </div>
-              </div>
-            </section>
-          </div>
-        </section>
+      <main class="pane" id="pane" tabindex="-1">
+        <div class="pane-inner" id="pane-inner"></div>
       </main>
     </div>
   </div>
 
-  <!-- ========================================================= overlays == -->
-  <div class="modal-layer" id="modal-layer" hidden>
-    <div class="modal-backdrop" data-close-modal></div>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <div class="modal-thumbs" id="modal-thumbs"></div>
-      <h2 class="title" id="modal-title">Who is this?</h2>
-      <p class="note" id="modal-sub">Group 1 · 3 faces in 3 photos</p>
-      <div class="modal-suggestions" id="modal-suggestions"></div>
-      <label class="sr-only" for="modal-name">Person name</label>
-      <input id="modal-name" type="text" autocomplete="off" placeholder="e.g. Alex" />
-      <p class="modal-error" id="modal-error" hidden></p>
-      <div class="modal-actions">
-        <button class="btn quiet" type="button" id="modal-skip">Send to _unknown</button>
-        <span class="spacer"></span>
-        <button class="btn quiet" type="button" data-close-modal>Cancel</button>
-        <button class="btn primary" type="button" id="modal-save">Save name</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
   <div class="sr-only" id="live" aria-live="polite"></div>
-  <canvas id="confetti" class="confetti-canvas" aria-hidden="true"></canvas>
 
-  <button class="scroll-top" id="scroll-top" type="button" hidden aria-label="Back to top">
-    <svg class="icon"><use href="#i-chevron-up" /></svg>
-  </button>
-
-  <div class="drag-veil" id="drag-veil" aria-hidden="true">
-    <div class="drag-veil-inner">
-      <svg class="icon"><use href="#i-folder-open" /></svg>
-      <strong>Drop to use this folder</strong>
-    </div>
-  </div>
-
-  <script src="app.js"></script>
+  <!-- Classic scripts in dependency order: file:// blocks ES modules. -->
+  <script src="js/dom.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/components.js"></script>
+  <script src="js/views/overview.js"></script>
+  <script src="js/views/scan.js"></script>
+  <script src="js/views/photos.js"></script>
+  <script src="js/views/people.js"></script>
+  <script src="js/views/relationships.js"></script>
+  <script src="js/views/gallery.js"></script>
+  <script src="js/views/settings.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>

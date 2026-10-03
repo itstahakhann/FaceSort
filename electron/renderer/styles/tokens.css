@@ -1,0 +1,161 @@
+/* ==========================================================================
+   FaceFlow — design tokens
+   --------------------------------------------------------------------------
+   Every colour, size, duration and easing in the application resolves to a
+   variable defined here. Nothing downstream may use a raw value; if a new
+   colour is needed it gets a name and a reason, not a hex code inline.
+
+   Dark is the default and the primary theme — light is the inversion of the
+   same ramp, not a separate palette.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* ---------------------------------------------------------- surfaces --
+     Five steps from the page to a raised panel. Each is a real step, not a
+     decorative gradient: bg -> surface -> elevated -> hover. */
+  --bg:            #0B0D10;
+  --surface:       #111418;
+  --surface-2:     #171B21;
+  --surface-hover: #1C2128;
+  --surface-sunken:#0A0C0F;
+
+  /* -------------------------------------------------------------- lines */
+  --border:        #252A32;
+  --border-strong: #313844;
+  --border-subtle: #1B2027;
+
+  /* --------------------------------------------------------------- text */
+  --text:          #F5F7FA;
+  --text-2:        #9299A5;
+  --text-3:        #666E7B;
+  --text-inverse:  #0B0D10;
+
+  /* ------------------------------------------------------------ accents */
+  --accent:        #5B8CFF;
+  --accent-hover:  #7BA3FF;
+  --accent-press:  #4573DB;
+  --accent-wash:   rgba(91, 140, 255, .12);
+  --accent-line:   rgba(91, 140, 255, .34);
+  --accent-ink:    #080C14;
+
+  --success:       #4ADE80;
+  --success-wash:  rgba(74, 222, 128, .12);
+  --warning:       #FBBF24;
+  --warning-wash:  rgba(251, 191, 36, .12);
+  --danger:        #F87171;
+  --danger-wash:   rgba(248, 113, 113, .12);
+
+  /* The one gradient in the system, and it earns its place: it gives the
+     single primary button a sense of depth without a border or shadow. */
+  --accent-grad: linear-gradient(180deg, #6C99FF 0%, #4E7EF5 100%);
+
+  /* ----------------------------------------------------------- geometry */
+  --r-sm: 5px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-full: 999px;
+
+  /* ------------------------------------------------------------ shadows */
+  /* Restrained on purpose. Elevation is communicated mostly by surface step
+     and border, because that survives at low contrast; shadow is the accent. */
+  --sh-1: 0 1px 2px rgba(0, 0, 0, .30);
+  --sh-2: 0 4px 12px rgba(0, 0, 0, .34);
+  --sh-3: 0 16px 40px rgba(0, 0, 0, .46);
+
+  /* --------------------------------------------------------- typography */
+  --font: Inter, "SF Pro Display", -apple-system, BlinkMacSystemFont,
+          "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  /* A 1.2 ratio. Body sits at 13px because this is a dense tool, but nothing
+     goes below 11px and nothing scales with viewport width. */
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-15: 15px;
+  --fs-17: 17px;
+  --fs-21: 21px;
+  --fs-27: 27px;
+  --fs-34: 34px;
+
+  --lh-tight: 1.25;
+  --lh-snug:  1.4;
+  --lh-body:  1.6;
+
+  /* ----------------------------------------------------------- spacing */
+  --s1: 4px;   --s2: 8px;   --s3: 12px;  --s4: 16px;
+  --s5: 20px;  --s6: 24px;  --s7: 32px;  --s8: 40px;
+  --s9: 56px;  --s10: 72px;
+
+  /* ----------------------------------------------------------- motion --
+     One language. Fast for state changes, slower for surfaces entering,
+     and every duration is a multiple so the app feels deliberate. */
+  --dur-1: 120ms;   /* hover, press, colour */
+  --dur-2: 180ms;   /* panels, cards, dropdowns */
+  --dur-3: 240ms;   /* modals, large entrances */
+  --ease: cubic-bezier(.2, .7, .3, 1);       /* ease-out for entrances */
+  --ease-in-out: cubic-bezier(.5, 0, .2, 1); /* moves that return */
+
+  /* ------------------------------------------------------------ layout */
+  --sidebar-w: 244px;
+  --topbar-h: 56px;
+  --content-max: 1180px;
+
+  /* ---------------------------------------------- depth for dark mode --
+     Hairlines read as lighter than the surface they sit on; on the light
+     theme the same borders are darkened instead. */
+  --ring: 0 0 0 3px var(--accent-wash);
+}
+
+/* ============================================================ light theme */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg:            #F6F7F9;
+  --surface:       #FFFFFF;
+  --surface-2:     #FFFFFF;
+  --surface-hover: #EFF1F4;
+  --surface-sunken:#EDEFF2;
+
+  --border:        #DFE3E9;
+  --border-strong: #C6CCD5;
+  --border-subtle: #EAEDF1;
+
+  --text:          #11151B;
+  --text-2:        #5A6472;
+  --text-3:        #8A93A1;
+  --text-inverse:  #FFFFFF;
+
+  --accent:        #2F6BE0;
+  --accent-hover:  #245BC8;
+  --accent-press:  #1E4EB0;
+  --accent-wash:   rgba(47, 107, 224, .10);
+  --accent-line:   rgba(47, 107, 224, .30);
+  --accent-ink:    #FFFFFF;
+
+  --success:       #12874A;
+  --success-wash:  rgba(18, 135, 74, .10);
+  --warning:       #96650A;
+  --warning-wash:  rgba(150, 101, 10, .10);
+  --danger:        #C02A2A;
+  --danger-wash:   rgba(192, 42, 42, .09);
+
+  --accent-grad: linear-gradient(180deg, #3F78E8 0%, #2F6BE0 100%);
+
+  --sh-1: 0 1px 2px rgba(16, 22, 32, .07);
+  --sh-2: 0 4px 14px rgba(16, 22, 32, .09);
+  --sh-3: 0 16px 40px rgba(16, 22, 32, .14);
+}
+
+/* Users who ask for less motion get none of the decorative kind. Functional
+   state changes still happen — they simply arrive instantly. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 1ms;
+    --dur-2: 1ms;
+    --dur-3: 1ms;
+  }
+}
