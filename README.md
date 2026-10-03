@@ -1,4 +1,6 @@
-# Face Grouping & Auto-Organizer
+# FaceFlow
+
+Private photo organization, powered locally.
 
 A local, **offline** desktop app that scans a folder of photos, detects every
 face, groups photos of the same person together, lets you name each group, and
@@ -7,14 +9,16 @@ sorts the photos into named folders. Nothing ever leaves your machine.
 The shipped desktop app is an **Electron shell around a Python engine**:
 
 ```
-┌─────────────────────────────┐        ┌──────────────────────────────────┐
-│  Electron (renderer)        │  HTTP  │  backend.exe  (PyInstaller)      │
-│  sidebar · cluster grid     │ ─────► │  FastAPI on 127.0.0.1:<free>    │
-│  main.js: spawn + lifecycle │  fetch │  scanner · detector · clusterer  │
-│  preload.js: narrow bridge  │ ◄───── │  organizer · SQLite name DB     │
-└─────────────────────────────┘  JSON  └──────────────────────────────────┘
+```
+```
+┌──────────────────────────────┐          ┌──────────────────────────────────┐
+│  Electron (renderer)         │   HTTP   │  backend.exe (PyInstaller)       │
+│  section nav · views         │    ►     │  FastAPI on 127.0.0.1:<free>     │
+│  main.js: spawn + lifecycle  │  fetch   │  scanner · detector · clusterer  │
+│  preload.js: narrow bridge   │          │  organizer · SQLite name DB      │
+└──────────────────────────────┘          └──────────────────────────────────┘
         │  stdout: "PORT:8000"
-        └────────────────────────► (main.js parses it, then polls /status)
+        └──────────◄ (main.js parses it, then polls /status)
 ```
 
 A source checkout also keeps the interactive **CLI** (`python -m src.main`) as
@@ -51,12 +55,12 @@ Implemented (M1 + M2 + M3 + M4 + M5 + M6):
   **Run Organizer** button that does the sorting — all offline, and the
   scan is cached in the session so interacting with the page never
   re-runs the face pipeline
-- **Electron desktop app (M5):** the shipped Windows app — one centred
-  editorial column with three sections (**Organise**, **People together**,
-  **Share gallery**), an enormous count for the count-as-hero moments, a grid
-  of group cards with face thumbnails, a manual "same person?" merge, and one
-  primary action per screen; the Python engine runs as a hidden child process
-  and the whole thing installs as a single `.exe` — see
+- **Electron desktop app (M5):** the shipped Windows app — a fixed
+  sidebar (Overview, People, Photos, Relationships, Gallery Export) beside a
+  content pane that swaps views without reloading, a cluster-card review
+  screen with naming and manual merge, pairwise relationship search, a guided
+  gallery export, and a live filmstrip while it scans. The Python engine runs
+  as a hidden child process; the whole thing installs as a single `.exe` — see
   [Desktop app](#desktop-app-electron--python)
 - **Local REST API (M5):** the engine behind the UI exposes `POST /scan`,
   `GET /clusters`, `POST /name_cluster`, `POST /organize` and `GET /status`
@@ -111,7 +115,7 @@ Defaults live in [`config.yaml`](config.yaml):
 | `mode` | `copy` | `copy` or `move` |
 | `detector_backend` | `retinaface` | `retinaface` / `dlib_hog` / `dlib_cnn` |
 | `unknown_folder` | `_unknown` | Folder for skipped clusters |
-| `names_db` | `./facesort_names.db` | Remembered people (SQLite); empty disables auto-labelling. The default spelling resolves to `%LOCALAPPDATA%\FaceSort\facesort_names.db` (`~/Library/Application Support/…`, `$XDG_DATA_HOME/…`), **not** the working directory; give an explicit path to override, or set `FACEORG_DATA_DIR` |
+| `names_db` | `./facesort_names.db` | Remembered people (SQLite); empty disables auto-labelling. The default spelling resolves to `%LOCALAPPDATA%\FaceFlow\facesort_names.db` (`~/Library/Application Support/…`, `$XDG_DATA_HOME/…`), **not** the working directory; give an explicit path to override, or set `FACEORG_DATA_DIR` |
 | `workers` | `0` | Worker processes for the vision stage: `0` = auto (`cpu_count // 2`, max 4), `1` = single process |
 | `use_eye_regions` | `true` | Extract a second periocular fingerprint per face (see [Age invariance](#age-invariance-childhood-adult-photos)); `false` restores whole-face-only clustering |
 | `weight_full_face` | `0.4` | Whole-face share of the fused distance |
@@ -178,9 +182,9 @@ Who is this? (name/skip)
 
   | Platform | Path |
   |----------|------|
-  | Windows | `%LOCALAPPDATA%\FaceSort\facesort_names.db` |
-  | macOS | `~/Library/Application Support/FaceSort/facesort_names.db` |
-  | Linux | `$XDG_DATA_HOME/FaceSort/facesort_names.db` (else `~/.local/share/…`) |
+  | Windows | `%LOCALAPPDATA%\FaceFlow\facesort_names.db` |
+  | macOS | `~/Library/Application Support/FaceFlow/facesort_names.db` |
+  | Linux | `$XDG_DATA_HOME/FaceFlow/facesort_names.db` (else `~/.local/share/…`) |
 
   `FACEORG_DATA_DIR` overrides the folder, and any explicit `names_db:` path
   is used verbatim.
@@ -258,7 +262,7 @@ round out, the nose lengthens. Cosine distance between a childhood photo and
 the same person's adult photo is therefore often larger than the clustering
 tolerance, which splits one person into a "child" group and an "adult" group.
 
-FaceSort fixes this with a **second fingerprint per face** and a blended
+FaceFlow fixes this with a **second fingerprint per face** and a blended
 distance.
 
 ### The periocular ("eye region") embedding
@@ -324,7 +328,7 @@ group leaned on the whole face alone, which is the hint to use the merge.
 
 ## HTML gallery export
 
-Instead of (or as well as) sorting photos into folders, FaceSort can build a
+Instead of (or as well as) sorting photos into folders, FaceFlow can build a
 **self-contained offline gallery**: one folder containing an HTML page, a
 stylesheet, a script and the images. It opens in any browser with no server and
 no network, so it can be zipped, emailed, put on a USB stick or opened on a
@@ -386,7 +390,7 @@ photo file.
 
 ## Relationships — "which photos have them together?"
 
-Pick two or more people and FaceSort shows only the photos where **every** one
+Pick two or more people and FaceFlow shows only the photos where **every** one
 of them appears. One person selected shows all their photos.
 
 Reachable from the title bar at any time (**Find together**), so you can search
@@ -469,6 +473,11 @@ a fallback for a partially typed name. An unmatched name comes back in
 `unknown` so the UI can say *which* name was wrong instead of quietly returning
 fewer photos than you asked for.
 
+> The renderer was rebuilt as **FaceFlow**. `REDESIGN_NOTES.md` records what
+> changed and — importantly — the two endpoints named in the original brief
+> that the engine does not actually have (`POST /split_cluster`, and
+> `GET`/`POST /config`), plus why Split ships disabled rather than faked.
+
 ## Desktop app (Electron + Python)
 
 The desktop app is two pieces that meet on a loopback socket:
@@ -482,67 +491,73 @@ The desktop app is two pieces that meet on a loopback socket:
 
 ### The interface
 
-One centred column, three sections in the top bar, and a small state machine
-underneath.
+A fixed sidebar beside a content pane that swaps views without the window ever
+reloading.
 
 **Navigation is a menu of things you might want, not a progress chart.**
-`Organise` owns the whole pipeline as four internal stages; `People together`
-and `Share gallery` are separate destinations you can reach at any time.
 
-1. **Choose** — the opening screen: one promise, one action, a drop target,
-   the destination inline, and settings behind a *Change settings* link. They
-   are set once and rarely touched, and folding them away keeps the first
-   screen to a single idea.
-2. **Look** — the count is the headline, at headline size, with a 12 px rail
-   underneath for the eye that wants a proportion. A filmstrip of recently
-   read photos scrolls past so a long scan visibly moves, and there is a
-   live preview of the current image (`GET /thumb`).
-3. **Name** — one card per group with cropped face thumbnails; clicking a
-   face opens it full-screen (`/photo`), *Details* flips the card in 3D to
-   show the destination folder and every file, naming opens a dialog with
-   name suggestions, and a toast confirms each name. Cards are titled by the
-   person's name once set, and the filter narrows them as you type.
-   **Same person?** links two groups that should be one (see
-   [Age invariance](#age-invariance-childhood-adult-photos)).
-4. **Sort** — the destination folders appear as they are created and photos
-   physically fly from the pile into them, one at a time, with the folder lid
-   flicking open as each lands. While this runs the screen answers "how far
-   along"; the checkmark, headline and tally only appear once it is true.
+| Section | What it is for |
+|---|---|
+| **Overview** | What has been found so far, and the one action to take next |
+| **People** | Everyone named, with photo counts; a person opens into their photo grid |
+| **Photos** | The review screen: one card per group, with naming, merge and sorting |
+| **Relationships** | Photos where several named people appear together |
+| **Gallery Export** | A four-step wizard producing a self-contained offline website |
 
-Then **People together** (big count, Venn, results, co-occurrence heatmap) and
-**Share gallery**.
+The sidebar also carries **Recent Activity** (your own actions, never raw log
+lines) and a **Settings** entry. At the bottom sits a permanent offline
+indicator — the product's central claim, stated rather than implied, and wired
+to the real network state.
+
+The organise pipeline runs inside **Overview** and **Photos**:
+
+1. **Scan** — pick or drop the input folder, set the destination, choose
+   copy-vs-move and the grouping parameters, then **Start scan**. The count is
+   the headline, at headline size, with a rail underneath for the eye that wants
+   a proportion. A filmstrip of recently read photos scrolls past so a long scan
+   visibly moves, alongside a live preview (`GET /thumb`).
+2. **Review** — one card per group with a face montage. Clicking a face opens it
+   full-screen (`/photo`), *Details* flips the card to show the destination
+   folder and every file, and naming opens a dialog with suggestions. Cards are
+   titled by the person's name once set, and the search box narrows them as you
+   type. **Merge** joins two groups that are really one person (see
+   [Age invariance](#age-invariance-childhood-adult-photos)). **Split** is
+   present but disabled — see `REDESIGN_NOTES.md`.
+3. **Sort** — the destination folders appear as they are created and each photo
+   is filed, with the count as the headline throughout.
+
+Groups you skip go into `_unknown`; photos with no face go into `_no_faces`.
+Nothing is discarded.
 
 ### Design system
 
-A stone-and-ink editorial system, no framework:
+Centralised tokens, no framework, no build step:
 
-- **Palette** — a neutral stone ramp, one emerald accent, one amber for
-  "working". Nothing else. Light and dark are the same ramp inverted, so
-  there is exactly one theme to design.
-- **Structure from rules, not boxes.** 1px and 2px hairlines divide content;
-  there are no card shadows and effectively no corner radii. That is what
-  keeps a dense screen reading as one page rather than a pile of cards.
-- **Type** — three families, each with one job: a condensed face for
-  statements and counts, the system face for reading, monospace for anything
-  the user might copy or compare.
-- **One primary action per screen**, always the largest thing on it.
-  Secondary actions are underlined text — if it is underlined, it will not
-  surprise you.
-- **Counts are headlines.** When the number is the answer to the question the
-  screen asked, it is set at display size, not in a corner of a status bar.
-- **Fills one screen.** Type and spacing scale with `clamp()` against `vh`, so
-  the app fits a laptop window without scrolling and still fills a large one.
-  Content-heavy screens scroll inside the stage; the page itself never does.
-- **Focus is never removed** — a 3px ink outline on every control.
+- **Palette** — a neutral stone ramp plus one blue accent, reserved for
+  progress, the active section and success. One dark ramp and one light ramp
+  that are inversions of each other, so there is a single theme to design.
+- **Spacing, radii, shadows, motion** — one scale each. Four durations are
+  enough: hover, panels, modals, view changes.
+- **Type** — body text at 13px, because this is a dense tool. Nothing scales
+  with viewport width and nothing goes below 11px.
+- **One primary action per view**, always the largest thing on it. Everything
+  else is a secondary button, a link or an icon button.
+- **Status is never colour alone.** Every state pairs a colour with a word or a
+  shape, so it survives a colour-blind reader and a greyscale screenshot.
+- **Focus is never removed.** A visible 2px accent outline on every control, and
+  a skip link to the content.
+- **Errors explain themselves.** A friendly sentence plus the engine's own
+  wording folded into a *Technical details* disclosure. A Python traceback is
+  never shown by default.
 
-Extras: dark/light theme (persisted, follows the OS on first run), toasts, a
-scroll-to-top button, an engine log panel, and `prefers-reduced-motion`
-support, which disables the flying-photo and confetti animations rather than
-merely speeding them up.
+Motion is restricted to `transform` and `opacity` at 120/180/240ms, entrances
+ease-out, and staggered card and grid entrances are driven by a `--i` custom
+property. `prefers-reduced-motion` collapses the durations to 1ms rather than
+merely shortening them, so decorative motion stops entirely while state changes
+still happen.
 
-Performance notes: animation is restricted to `transform`/`opacity` (no layout
-thrash), staggered card reveals are capped, and `will-change` is deliberately
-avoided.
+Polling starts only while a job is running and stops the moment it settles, so
+an idle app makes no requests at all.
 
 `main.js` resolves the engine from the mode it is running in, and logs the
 exact path before spawning it (this is the first thing to check when startup
@@ -583,9 +598,9 @@ when the window does not appear:
 ```
 [bridge] mode    : development
 [bridge] engine  : …\python_build\dist\backend\backend.exe
-[bridge] cwd     : …\FaceSort
+[bridge] cwd     : …\FaceFlow
 [bridge] spawned … (pid 4720)
-[bridge] renderer ready: {"title":"FaceSort","bridge":"object","cards":0,…}
+[bridge] renderer ready: {"title":"FaceFlow","bridge":"object","cards":0,…}
 [bridge] engine reported port 52459
 [bridge] engine is ready
 ```
@@ -671,7 +686,7 @@ What the master script does, step by step:
 |------|---------|----------|
 | 0 | `python build.py models` | stages the two ONNX weights in `python_build\models\buffalo_l` |
 | 1 | `python build.py backend` → `pyinstaller --noconfirm --distpath python_build\dist --workpath python_build\build backend.spec` | the engine at `python_build\dist\backend\backend.exe` (+ `_internal\`, models included) |
-| 2 | `npm run electron:build` (electron-builder) | `electron\release\FaceSort-Setup-1.0.0.exe` |
+| 2 | `npm run electron:build` (electron-builder) | `electron\release\FaceFlow-Setup-1.0.0.exe` |
 
 Step 1 is the Python half and npm cannot run it, so after changing anything
 under `src\`, run `build.bat` (or `python build.py backend`) before
@@ -682,8 +697,8 @@ The build produces three ready-to-run `.exe` files:
 
 | File | What it is | How to run it |
 |------|------------|---------------|
-| `electron/release/FaceSort-Setup-1.0.0.exe` | **NSIS installer** — per-user, lets the user pick the folder, creates desktop + start-menu shortcuts | Double-click, install, launch from the shortcut |
-| `electron/release/FaceSort-Portable-1.0.0.exe` | **Portable single file** (no installer) — the same app, unpacked to `%TEMP%` on each launch (`npm run dist:portable`) | Copy it anywhere and double-click |
+| `electron/release/FaceFlow-Setup-1.0.0.exe` | **NSIS installer** — per-user, lets the user pick the folder, creates desktop + start-menu shortcuts | Double-click, install, launch from the shortcut |
+| `electron/release/FaceFlow-Portable-1.0.0.exe` | **Portable single file** (no installer) — the same app, unpacked to `%TEMP%` on each launch (`npm run dist:portable`) | Copy it anywhere and double-click |
 | `python_build/dist/backend/backend.exe` | **Standalone engine** (onefile variant: `python build.py backend --onefile`) — the API server with the ONNX weights inside, no UI | Prints `PORT:<port>`; for scripted/headless use or another front-end |
 
 ### Where the weights come from
@@ -732,7 +747,7 @@ weights ride along inside `resources/_internal/models/buffalo_l/`, so there is
 no second copy and no environment variable to set.
 
 ```
-FaceSort/
+FaceFlow/
 └── resources/
     ├── app.asar                    # Electron shell (main.js, preload.js, renderer/)
     ├── backend.exe                 # the Python engine (spawned by main.js)
@@ -910,7 +925,7 @@ model weights (only `--real` does). They are also collectable by `pytest tests/`
 ## Project layout
 
 ```
-FaceSort/
+FaceFlow/
 ├── src/
 │   ├── main.py          # CLI entry point (M1 pipeline)
 │   ├── cli.py           # alias for main.py
@@ -935,9 +950,14 @@ FaceSort/
 │   ├── preload.js       # the only renderer↔Node bridge (REST + dialogs)
 │   ├── build/icon.ico   # app icon (regenerate: python tools/make_icon.py)
 │   └── renderer/
-│       ├── index.html   # shell: brand, three-section nav, one stage
-│       ├── styles.css   # design system (no framework, no build step)
-│       └── app.js       # view state machine + the five endpoints
+│       ├── index.html      # shell: brand, section nav, icon sprite│ ─────►
+│       ├── styles/         # tokens, base, components, shell, views
+│       └── js/             # classic scripts on one namespace (file:// blocks ESM)
+│           ├── core.js        # API client, formatting, observable store
+│           ├── ui.js          # toasts, dialogs, lightbox, empty + error states
+│           ├── components.js  # cluster card, lazy photo grid
+│           ├── app.js         # router, theme, engine polling, drag-and-drop
+│           └── views/         # one file per section
 ├── tools/
 │   └── make_icon.py     # regenerates electron/build/icon.ico
 ├── build.bat            # master build script (Windows): PyInstaller -> npm run build

@@ -1,93 +1,128 @@
-FaceSort groups photos by whose face is in them and files each one into a
-folder named after that person. Everything runs on your own machine — no photo,
-face or name is ever uploaded.
+# FaceFlow 1.0.0
 
-The problem it solves is age progression. Standard face embeddings encode face
+**Private photo organization, powered locally.**
+
+FaceFlow finds the people in your photo library and files each photo into a
+folder named after them. Everything runs on your own machine — no photo, face or
+name is ever uploaded, and the app makes no network requests at all. There is
+no account and nothing to sign in to.
+
+## What it does that a plain face-recognition script does not
+
+The hard problem is **age progression**. Standard face embeddings encode face
 *shape* as much as identity, and shape changes as a child grows, so one person's
-childhood and adult photos land in separate groups. FaceSort adds a second
-fingerprint from the periocular region — brows, eyes and the bridge of the nose,
-which barely change with age — and clusters on a blend of both.
+childhood photos and adult photos land in separate groups. FaceFlow adds a
+second fingerprint from the periocular region — brows, eyes and the bridge of
+the nose, which barely change with age — and clusters on a blend of both.
+
+When it still cannot bridge the gap — usually one blurry or very small photo —
+you correct it yourself. Merge two groups that are really the same person, give
+it a name, and the link is remembered so future scans group them on their own.
 
 ## Downloads (Windows x64)
 
 | File | Size | What it is |
 |------|------|------------|
-| `FaceSort-Setup-1.0.0.exe` | 386 MB | Installer. Puts FaceSort in your Start menu. |
-| `FaceSort-Portable-1.0.0.exe` | 360 MB | Single file. Runs from anywhere, no install. |
+| `FaceFlow-Setup-1.0.0.exe` | SIZE_SETUP | Installer. Adds FaceFlow to your Start menu. |
+| `FaceFlow-Portable-1.0.0.exe` | SIZE_PORTABLE | Single file. Runs from anywhere, no install. |
 
 > **These builds are not code-signed.** Windows SmartScreen will show a blue
 > "Windows protected your PC" warning on first run, because it cannot verify an
 > unknown publisher. Click **More info → Run anyway**. This is expected for any
 > self-built open-source release, not a sign of a problem with the download.
 
-## First run
+## Getting started
 
-Three sections sit along the top: **Organise**, **People together** and
-**Share gallery**.
+Five sections down the left, and the content area changes without the window
+ever reloading.
 
-1. In **Organise**, press **Choose photo folder** (or drag a folder anywhere
-   onto the window). Where the sorted folders go is shown inline on that first
-   screen; everything else lives behind *Change settings*.
-2. Watch the count climb while it reads your library.
-3. On **Name each group**, give each person a name. Click a face to enlarge
-   it, or *Details* to see exactly which photos and folder they are headed for.
-4. **Sort into folders** copies the photos into `output/<person>/`. You can
-   watch them go: the folders appear as they are created and each photo flies
-   into the right one.
+1. **Overview** tells you what has been found so far and what to do next. Press
+   **Scan photos**, or drag a photo folder anywhere onto the window.
+2. **Photos** is the screen that matters. Every person-sized group is a card
+   with their face montage, their photo count, and four actions: *Name*,
+   *Merge*, *Split* and *Details*. Give each group a name, then **Sort into
+   folders** when you are done.
 
-Groups you skip go into `_unknown`; photos with no face go into `_no_faces`.
-Nothing is ever discarded.
+Groups you skip go into `_unknown` and photos with no face go into
+`_no_faces`. Nothing is ever discarded.
 
 ### If one person appears as two groups
 
-Usually a childhood photo and an adult one that the model could not bridge —
-often a blurry or very small face. Click **Same person?**, select the two
-groups, and link them. Give it a name and the link is remembered, so future
-scans group them on their own.
+Click **Merge** on one of them, then click the other. Their photos are combined
+into a single group. Supply a name and the link is remembered permanently.
 
-## Find photos of people together
+### Split is not available in 1.0.0
 
-**People together** answers "who was in this photo?". Pick two or more people
-and you get only the photos where *every* one of them appears — which is how
-you find the family trip rather than one person's pictures of it. A single
-person shows all their photos. There is also a co-occurrence map where darker
-means more shared photos, and clicking a pair searches for those two.
+The **Split** control is present but disabled, and it says why: the local engine
+has no split operation yet. Use **Merge** to join two groups the engine pulled
+apart, and **Skip** to set a group aside. Adding real splitting means changing
+the recognition and storage layers, not just the interface, so it is deliberately
+not faked here.
 
-It draws on runs where you typed a name, so name your groups as you go.
+## People
 
-## Share a gallery
+Everyone you have named, with their photo count. Open one to see their photos
+in a grid, rename them, or jump straight to finding who they were photographed
+with.
 
-**Share gallery** writes a folder containing one HTML page, a stylesheet, a
-script and your photos. It opens in any browser with no server and no network,
-so it can be zipped, emailed, put on a USB stick, or opened on a phone with no
-signal — and it will still work in ten years. It has a people index, a
-per-person grid, a full-screen lightbox (arrow keys, `Esc`, swipe), a name
-filter, and a dark/light toggle.
+## Relationships
 
-You can restrict it to chosen people and put a password on it.
+**Pick two or more people to see only the photos where every one of them
+appears** — which is how you find the family trip rather than one person's
+pictures of it. A single person shows all their photos.
+
+Below that, *Who appears together* ranks pairs by how many photos they share.
+Click a pair to see them. Export any result to a new folder.
+
+This draws on the names you give your groups, so it grows as you use the app.
+
+## Gallery export
+
+Builds a folder containing one HTML page, a stylesheet, a script and your photos.
+It opens in any browser with no server and no network, so you can zip it, email
+it, put it on a USB stick, or open it on a phone with no signal — and it will
+still work in ten years.
+
+It has a people index, a per-person grid, a full-screen viewer (arrow keys,
+`Esc`, swipe on a phone), a name filter and a dark/light toggle. You can restrict
+it to chosen people and put a password on it.
 
 **The password is a gate, not encryption.** The SHA-256 digest ships inside the
-HTML, so anyone who opens the source can read it, and a weak password falls to
-an offline dictionary. It stops a family member or a guest from casually
-browsing; it does not stop anyone who means it — and because a browser must be
-able to read a JPEG to display it, anyone who can open the page can open the
-image files directly. If you need real protection, keep the photos somewhere
-the browser cannot reach.
+HTML file, so anyone who opens the source can read it, and a weak password falls
+to an offline dictionary. It stops a family member or a guest from casually
+browsing; it does not stop anyone determined — and because a browser must be able
+to read a JPEG to display it, anyone who can open the page can open the image
+files directly. FaceFlow says this in the app as well, next to the setting.
+
+## Settings
+
+Everything the engine actually reads, grouped as **Scanning**,
+**Organization** and **Appearance**: photo folder, destination, minimum faces
+per group, worker processes, match strictness, copy-vs-move, and theme.
+
+Settings are applied to your next scan. FaceFlow does not claim to save them
+anywhere else, because it does not.
 
 ## Requirements and performance
 
-- Windows 10/11, x64. No GPU needed, no Python, no internet.
+- Windows 10/11, x64. No GPU needed, no Python, no internet, no account.
 - Roughly **0.3 images per second** on a modest dual-core laptop, rising with
   more cores. A 1,000-photo library takes around an hour.
 - The age-invariance pass adds about 21% per image; detection dominates the
   cost either way.
+- **Worker processes** in Settings will finish sooner at the cost of memory.
+  It is set to auto by default.
 
 ## Privacy
 
 Inference is fully offline. The only code path that touches the network is
 `python build.py models`, which fetches the ONNX weights once during a build —
-never during normal use. Your photos are read, never modified (unless you
-choose **Move** instead of **Copy**).
+never during normal use.
+
+Your photos are read, never modified, unless you choose **Move** instead of
+**Copy**. There is no telemetry, no analytics, no crash reporting and no update
+check. The offline indicator in the sidebar reflects the real network state, so
+if it says offline, the app is genuinely not reaching the internet.
 
 ## Building from source
 
