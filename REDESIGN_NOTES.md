@@ -91,7 +91,8 @@ Electron `productName` was `FaceSort`, and the engine's service string is
 separate again. The redesign adopts **FaceFlow** in:
 
 - `index.html` (`<title>`) and the sidebar brand
-- `electron/main.js` — window and app-menu titles
+- `electron/main.js` - the window title, and the titles on the two native
+  error dialogs
 - `electron/package.json` — `productName`, `appId`, `artifactName`,
   `nsis.shortcutName`
 
@@ -159,3 +160,33 @@ shipping `index.html` / `js/` / `styles/`; only the engine payloads are
 fabricated. Startup, the engine handshake and every section were additionally
 verified against the **real** engine, and the packaged `FaceFlow.exe` was
 smoke-tested to confirm the renderer ships inside `app.asar`.
+
+## The menu bar was removed, not renamed
+
+The File/Edit/View/Window/Help bar took a row of window height, and every
+item on it was already reachable elsewhere:
+
+- *Open input folder* only jumped to the screen where a folder is chosen,
+  which the sidebar reaches directly.
+- *View* and *Window* offered reload, zoom and fullscreen, all of which the
+  title bar buttons and the maximised window already cover.
+- *Help > About* said **less** than Settings > About, which shows the
+  version, the engine path, the name-database path and an offline callout.
+  Reinstating a dialog that says less would be a downgrade, so it was left
+  out rather than re-homed.
+
+Removing the bar also removes its accelerators, so the three worth keeping
+are re-registered in `installWindowShortcuts` through `before-input-event`:
+`Ctrl+Shift+I`/`F12` (the release README tells people to press this when the
+window comes up blank, so it is the only diagnostic a user has), `Ctrl+O`,
+and `Ctrl+R`/`F5`.
+
+`globalShortcut` would have been the wrong tool here: it registers with the
+operating system and would take these keys from every other program on the
+machine.
+
+### Known trade-off
+
+Fullscreen (View > Toggle Fullscreen) is gone. Maximise still works, and
+Ctrl+Shift+I can open the standalone DevTools window if a true full-screen
+view is ever needed for debugging.

@@ -85,7 +85,7 @@ function fail(message, detail) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('backend:log', `ERROR: ${message}`);
   }
-  dialog.showErrorBox('FaceSort', detail ? `${message}\n\n${detail}` : message);
+  dialog.showErrorBox('FaceFlow', detail ? `${message}\n\n${detail}` : message);
 }
 
 /* -------------------------------------------------------- backend process */
@@ -177,7 +177,7 @@ function startBackend() {
     if (!quitting) {
       pushBackendLog(`The engine stopped unexpectedly (code ${code}).`);
       dialog.showErrorBox(
-        'FaceSort',
+        'FaceFlow',
         'The Python engine stopped unexpectedly. Please restart the app.'
       );
     }
@@ -331,6 +331,11 @@ function createWindow() {
     backgroundColor: '#0f1115',
     title: 'FaceFlow',
     icon: path.join(__dirname, 'build', 'icon.ico'),
+    // No File/Edit/View/Window/Help bar: it cost a row of window height and
+    // every item on it was either already on screen or re-registered as a
+    // keyboard shortcut below. Set twice on purpose — the option stops a bar
+    // flashing during construction, the call removes it once the window exists.
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -340,7 +345,8 @@ function createWindow() {
     },
   });
 
-  Menu.setApplicationMenu(buildMenu());
+  Menu.setApplicationMenu(null);
+  installWindowShortcuts(mainWindow);
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   mainWindow.once('ready-to-show', () => mainWindow.show());
   // A fast engine can be ready before the renderer finished loading, and an
@@ -356,55 +362,41 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
-function buildMenu() {
-  const template = [
-    ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    {
-      label: 'File',
-      submenu: [
-        {
-          label: 'Open input folder…',
-          accelerator: 'CmdOrCtrl+O',
-          click: () => mainWindow && mainWindow.webContents.send('menu:pick-input'),
-        },
-        { type: 'separator' },
-        process.platform === 'darwin' ? { role: 'close' } : { role: 'quit' },
-      ],
-    },
-    { role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'toggleDevTools' },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-      ],
-    },
-    { role: 'windowMenu' },
-    {
-      role: 'help',
-      submenu: [
-        {
-          label: 'About',
-          click: () => dialog.showMessageBox(mainWindow, {
-            type: 'info',
-            title: 'FaceFlow',
-            message: `FaceSort ${app.getVersion()}`,
-            detail:
-              'Groups the faces in your photos and sorts them into named ' +
-              'folders. Everything runs locally — no photo, face or name ' +
-              'ever leaves this computer.',
-          }),
-        },
-      ],
-    },
-  ];
-  return Menu.buildFromTemplate(template);
+/**
+ * The shortcuts that used to live on the removed menu bar.
+ *
+ * `Menu.setApplicationMenu(null)` takes the accelerators down with the bar, so
+ * the three worth keeping are re-registered here:
+ *
+ *   Ctrl+Shift+I / F12  developer tools. The release README tells people to
+ *                       press this when the window comes up blank, so losing
+ *                       it would remove the only diagnostic a user has.
+ *   Ctrl+O               jump to the screen where a folder is chosen. The old
+ *                       menu item did exactly this and nothing more.
+ *   Ctrl+R / F5          reload, which is how you recover from a wedged
+ *                       renderer without killing the engine.
+ *
+ * `before-input-event` rather than `globalShortcut`, deliberately: the latter
+ * registers with the operating system and would steal these keys from every
+ * other application on the machine.
+ */
+function installWindowShortcuts(win) {
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const key = String(input.key || '').toLowerCase();
+    const ctrl = Boolean(input.control || input.meta);
+
+    if ((ctrl && input.shift && key === 'i') || key === 'f12') {
+      event.preventDefault();
+      win.webContents.toggleDevTools();
+    } else if (ctrl && !input.shift && (key === 'o')) {
+      event.preventDefault();
+      win.webContents.send('menu:pick-input');
+    } else if (key === 'f5' || (ctrl && key === 'r')) {
+      event.preventDefault();
+      win.webContents.reload();
+    }
+  });
 }
 
 /* ------------------------------------------------------------------ IPC */
@@ -449,6 +441,11 @@ ipcMain.handle('app:info', () => ({
   backendCwd: workingDirectory(),
   resourcesPath: IS_PACKAGED ? process.resourcesPath : null,
 }));
+
+/* Note: the old Help > About box is gone with the menu bar, and nothing is
+   lost by it — Settings > About already shows the version, the engine path, the
+   name-database path and an offline callout, which is strictly more than the
+   dialog said. Reinstating a dialog that says less would be a downgrade. */
 
 /* ------------------------------------------------------------ lifecycle */
 

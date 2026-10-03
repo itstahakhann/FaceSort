@@ -639,7 +639,7 @@ Useful while developing:
 | Goal | Command |
 |---|---|
 | Auto-verify the bridge, then exit | `FACEORG_SMOKE=1 npm start` |
-| Open DevTools | `Ctrl+Shift+I` in the window (or View → Toggle DevTools) |
+| Open DevTools | `Ctrl+Shift+I` or `F12` in the window |
 | Skip GPU (old drivers, blank window) | `npx electron . --disable-gpu` |
 | Inspect the real window over HTTP | `npx electron . --remote-debugging-port=9223`, then open `http://127.0.0.1:9223` |
 
